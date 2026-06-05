@@ -9,8 +9,44 @@ const { getState, setContractSize } = require("./utils/state");
 const { ensureLoggedIn, submitSmsCode, getPendingWorkflow, scheduleDailyReauth, validateWhopLicense } = require("./utils/reauth");
 const rh = require("./utils/robinhood");
 
+app.get("/manifest.json", (req, res) => {
+  res.sendFile(require("path").join(__dirname, "dashboard", "manifest.json"));
+});
+app.get("/sw.js", (req, res) => {
+  res.setHeader("Service-Worker-Allowed", "/");
+  res.sendFile(require("path").join(__dirname, "dashboard", "sw.js"));
+});
+app.get("/icon.svg", (req, res) => {
+  res.sendFile(require("path").join(__dirname, "dashboard", "icon.svg"));
+});
+
 app.get("/health", (req, res) => {
   res.json({ status: "running", time: new Date().toISOString(), auth: rh.getToken() ? "connected" : "disconnected" });
+});
+
+app.get("/api/buying-power", async (req, res) => {
+  try {
+    var token = rh.getToken();
+    if (!token) return res.json({ buying_power: null });
+    var https = require("https");
+    var data = await new Promise((resolve, reject) => {
+      var options = {
+        hostname: "api.robinhood.com",
+        path: "/accounts/" + process.env.RH_ACCOUNT_NUMBER + "/",
+        headers: { "Authorization": "Bearer " + token, "Accept": "application/json" }
+      };
+      var req2 = https.request(options, (r) => {
+        var raw = "";
+        r.on("data", chunk => raw += chunk);
+        r.on("end", () => { try { resolve(JSON.parse(raw)); } catch(e) { resolve({}); } });
+      });
+      req2.on("error", reject);
+      req2.end();
+    });
+    res.json({ buying_power: data.buying_power || data.cash || null });
+  } catch(e) {
+    res.json({ buying_power: null });
+  }
 });
 
 app.get("/api/state", async (req, res) => {
