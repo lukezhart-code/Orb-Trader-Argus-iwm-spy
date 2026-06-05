@@ -1,5 +1,26 @@
+var fs = require("fs");
+var PERSIST_FILE = "/tmp/orb-state.json";
+
+function loadPersistedState() {
+  try {
+    if (fs.existsSync(PERSIST_FILE)) {
+      var saved = JSON.parse(fs.readFileSync(PERSIST_FILE, "utf8"));
+      return saved;
+    }
+  } catch(e) {}
+  return null;
+}
+
+function savePersistedState() {
+  try {
+    fs.writeFileSync(PERSIST_FILE, JSON.stringify({ contracts: state.contracts }));
+  } catch(e) {}
+}
+
+var _saved = loadPersistedState();
+
 let state = {
-  contracts: { SPY: 1, IWM: 1 },
+  contracts: (_saved && _saved.contracts) ? _saved.contracts : { SPY: 1, IWM: 1 },
   orb: {
     SPY: { high: null, low: null, mid: null, set: false },
     IWM: { high: null, low: null, mid: null, set: false }
@@ -82,6 +103,7 @@ function closePosition(ticker, reason) {
 function setContractSize(spy, iwm) {
   state.contracts.SPY = parseInt(spy) || 1;
   state.contracts.IWM = parseInt(iwm) || 1;
+  savePersistedState();
   logEvent("CONTRACTS", "Size updated SPY=" + state.contracts.SPY + " IWM=" + state.contracts.IWM);
 }
 
