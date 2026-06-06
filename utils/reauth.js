@@ -57,11 +57,17 @@ async function validateWhopLicense() {
       req.write(body);
       req.end();
     });
+    stateModule.logEvent("LICENSE_DEBUG", "Whop response: " + JSON.stringify(result));
     if (result.valid === true) {
       stateModule.logEvent("LICENSE_OK", "Whop license valid");
       return true;
     }
-    stateModule.logEvent("LICENSE_INVALID", "Invalid license: " + (result.error || result.message || JSON.stringify(result)));
+    // Try checking membership status directly
+    if (result.status === "active" || result.status === "trialing") {
+      stateModule.logEvent("LICENSE_OK", "Whop membership active");
+      return true;
+    }
+    stateModule.logEvent("LICENSE_INVALID", "Invalid license: " + JSON.stringify(result));
     return false;
   } catch(err) {
     stateModule.logEvent("LICENSE_ERROR", "License check failed: " + err.message);
