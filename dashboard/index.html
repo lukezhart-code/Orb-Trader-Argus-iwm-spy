@@ -2,7 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ORB Trader">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#00e5a0">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon.svg">
 <title>ORB Trader</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
@@ -963,6 +970,15 @@ async function loadState() {
     const res = await fetch(BASE + '/api/state');
     state = await res.json();
     renderState(state);
+    // Fetch buying power
+    try {
+      const bpRes = await fetch(BASE + '/api/buying-power');
+      const bpData = await bpRes.json();
+      const bpEl = document.getElementById('val-buying-power');
+      if (bpEl && bpData.buying_power) {
+        bpEl.textContent = '$' + parseFloat(bpData.buying_power).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      }
+    } catch(e) {}
   } catch (e) {
     console.error('Failed to load state', e);
   }
@@ -973,8 +989,10 @@ function renderState(s) {
   document.getElementById('val-spy-c').textContent = s.contracts?.SPY || '1';
   document.getElementById('val-iwm-c').textContent = s.contracts?.IWM || '1';
   // Sync inputs with server state
-  if (s.contracts?.SPY) document.getElementById('input-spy-c').value = s.contracts.SPY;
-  if (s.contracts?.IWM) document.getElementById('input-iwm-c').value = s.contracts.IWM;
+  const spyInput = document.getElementById('input-spy-c');
+  const iwmInput = document.getElementById('input-iwm-c');
+  if (spyInput && s.contracts?.SPY) spyInput.value = s.contracts.SPY;
+  if (iwmInput && s.contracts?.IWM) iwmInput.value = s.contracts.IWM;
 
   const spyTraded = s.positions?.SPY && !s.positions.SPY.stopped;
   const iwmTraded = s.positions?.IWM && !s.positions.IWM.stopped;
@@ -1167,6 +1185,17 @@ async function checkAuth() {
 }
 checkAuth();
 setInterval(checkAuth, 30000);
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      console.log('SW registered');
+    }).catch(function(err) {
+      console.log('SW failed:', err);
+    });
+  });
+}
 </script>
 </body>
 </html>
