@@ -577,6 +577,30 @@
   .text-red { color: var(--red); }
   .text-amber { color: var(--amber); }
   .gap-8 { display: flex; gap: 8px; align-items: center; }
+
+  /* Live ticker */
+  .ticker-feed { display:flex; flex-direction:column; gap:6px; }
+  .ticker-item { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg); border:1px solid var(--border); }
+  .ticker-sym { font-size:13px; font-weight:600; color:var(--white); }
+  .ticker-price { font-size:16px; font-weight:300; font-variant-numeric:tabular-nums; color:var(--white); }
+  .ticker-change { font-size:11px; font-family:var(--mono); }
+  .ticker-change.up { color:var(--green); }
+  .ticker-change.down { color:var(--red); }
+  /* P&L tracker */
+  .pnl-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); }
+  .pnl-cell { background:var(--surface); padding:12px 14px; }
+  .pnl-label { font-size:9px; color:var(--text-dim); letter-spacing:0.12em; text-transform:uppercase; font-family:var(--mono); margin-bottom:4px; }
+  .pnl-value { font-size:18px; font-weight:300; font-variant-numeric:tabular-nums; }
+  .pnl-value.positive { color:var(--green); }
+  .pnl-value.negative { color:var(--red); }
+  .pnl-value.neutral { color:var(--text-dim); }
+  /* Position price feed */
+  .pos-price-feed { display:flex; flex-direction:column; gap:6px; }
+  .pos-price-item { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg); border-left:3px solid var(--green); }
+  .pos-price-item.put { border-left-color:var(--red); }
+  @media (max-width:768px) {
+    .pnl-grid { grid-template-columns:repeat(2,1fr); }
+  }
 </style>
 </head>
 <body>
@@ -612,10 +636,6 @@
         <div class="metric-sub">Claude account</div>
       </div>
       </div>
-      <div class="metric" id="m-license">
-        <div class="metric-label">License</div>
-        <div class="metric-value" id="val-license" style="font-size:16px">—</div>
-        <div class="metric-sub" id="val-license-sub">checking...</div>
       </div>
       <div class="metric" id="m-spy-c">
         <div class="metric-label">SPY Contracts</div>
@@ -649,18 +669,28 @@
     </div>
 
         </div>
+    </div>
 
-    <div id="license-banner" style="display:none;margin-bottom:12px;padding:14px 18px;background:var(--red-dim);border:1px solid var(--red);border-radius:4px;display:flex;align-items:center;justify-content:space-between;gap:16px">
-      <span style="font-size:12px;color:var(--red);font-family:var(--mono)">⚠ No valid license — trading is disabled. Enter your Whop license key below.</span>
-      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
-        <input type="text" id="license-input" placeholder="MEM-XXXXXX-XXXXXXXX-XXXXXXX" style="font-family:var(--mono);font-size:11px;background:var(--bg);border:1px solid var(--red);color:var(--text);padding:6px 10px;outline:none;width:260px">
-        <button onclick="activateLicense()" style="font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;background:var(--red);color:var(--bg);border:none;padding:7px 14px;cursor:pointer">Activate</button>
+    <!-- P&L Tracker -->
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-header">
+        <span class="panel-title">P&L Tracker</span>
+        <span style="font-size:10px;color:var(--text-dim);font-family:var(--mono)" id="pnl-updated">—</span>
+      </div>
+      <div class="pnl-grid">
+        <div class="pnl-cell"><div class="pnl-label">Daily</div><div class="pnl-value neutral" id="pnl-daily">—</div></div>
+        <div class="pnl-cell"><div class="pnl-label">Weekly</div><div class="pnl-value neutral" id="pnl-weekly">—</div></div>
+        <div class="pnl-cell"><div class="pnl-label">Monthly</div><div class="pnl-value neutral" id="pnl-monthly">—</div></div>
+        <div class="pnl-cell"><div class="pnl-label">Yearly</div><div class="pnl-value neutral" id="pnl-yearly">—</div></div>
       </div>
     </div>
 
-    <div class="grid-2">
-      <!-- ORB Levels + Signals -->
-      <div class="panel">
+    <div style="display:grid;grid-template-columns:1fr 280px;gap:12px;margin-bottom:12px">
+      <!-- Left: ORB + Activity -->
+      <div>
+        <div class="grid-2">
+          <!-- ORB Levels + Signals -->
+          <div class="panel">
         <div class="panel-header">
           <span class="panel-title">ORB Levels + Signals</span>
           <span class="text-dim" style="font-size:10px" id="orb-time">—</span>
@@ -718,6 +748,33 @@
         </div>
       </div>
     </div>
+
+        </div><!-- end left -->
+      </div><!-- end grid-2 -->
+
+      <!-- Right sidebar: Live Prices + Position Feed -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Live Prices</span><span style="font-size:9px;color:var(--text-dim);font-family:var(--mono)" id="prices-updated">—</span></div>
+          <div class="panel-body" style="padding:8px">
+            <div class="ticker-feed">
+              <div class="ticker-item"><span class="ticker-sym">SPY</span><div style="text-align:right"><div class="ticker-price" id="price-SPY">—</div><div class="ticker-change" id="chg-SPY">—</div></div></div>
+              <div class="ticker-item"><span class="ticker-sym">IWM</span><div style="text-align:right"><div class="ticker-price" id="price-IWM">—</div><div class="ticker-change" id="chg-IWM">—</div></div></div>
+              <div class="ticker-item"><span class="ticker-sym">QQQ</span><div style="text-align:right"><div class="ticker-price" id="price-QQQ">—</div><div class="ticker-change" id="chg-QQQ">—</div></div></div>
+              <div class="ticker-item"><span class="ticker-sym">SPX</span><div style="text-align:right"><div class="ticker-price" id="price-SPX">—</div><div class="ticker-change" id="chg-SPX">—</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Open Positions</span></div>
+          <div class="panel-body" style="padding:8px">
+            <div class="pos-price-feed" id="pos-price-feed">
+              <div style="color:var(--text-dim);font-size:12px;font-family:var(--mono)">No open positions</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- end outer grid -->
 
     <!-- Trade History -->
     <div class="panel">
@@ -965,6 +1022,79 @@ function updateWebhookURL() {
 
 
 
+// ── Live price feed ──────────────────────────────────────────────────────────
+var _prevPrices = {};
+
+async function loadLivePrices() {
+  try {
+    const res = await fetch(BASE + '/api/prices');
+    const data = await res.json();
+    if (!data.prices) return;
+    const now = new Date().toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    document.getElementById('prices-updated').textContent = now;
+    Object.entries(data.prices).forEach(([sym, info]) => {
+      const priceEl = document.getElementById('price-' + sym);
+      const chgEl = document.getElementById('chg-' + sym);
+      if (!priceEl || !info.price) return;
+      const price = parseFloat(info.price);
+      const prev = parseFloat(info.prev_close || price);
+      const chg = price - prev;
+      const chgPct = prev > 0 ? ((chg / prev) * 100).toFixed(2) : 0;
+      const isUp = chg >= 0;
+      priceEl.textContent = '$' + price.toFixed(2);
+      if (chgEl) {
+        chgEl.textContent = (isUp ? '+' : '') + chg.toFixed(2) + ' (' + (isUp ? '+' : '') + chgPct + '%)';
+        chgEl.className = 'ticker-change ' + (isUp ? 'up' : 'down');
+      }
+    });
+
+    // Update position price feed
+    if (state && data.prices) {
+      const feed = document.getElementById('pos-price-feed');
+      if (!feed) return;
+      const positions = state.positions || {};
+      const activePosHtml = Object.entries(positions).filter(([t,p]) => p && !p.stopped).map(([t,p]) => {
+        const priceInfo = data.prices[t];
+        const currentPrice = priceInfo ? parseFloat(priceInfo.price).toFixed(2) : '—';
+        return `<div class="pos-price-item ${p.side}">
+          <div>
+            <div style="font-size:13px;font-weight:700">${t}</div>
+            <div style="font-size:10px;color:var(--text-dim);font-family:var(--mono)">${p.side.toUpperCase()} · ${p.contracts}c</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:15px;font-variant-numeric:tabular-nums">$${currentPrice}</div>
+            <div style="font-size:10px;color:var(--text-dim);font-family:var(--mono)">entry $${p.entryPrice?.toFixed(2) || '—'}</div>
+          </div>
+        </div>`;
+      }).join('');
+      feed.innerHTML = activePosHtml || '<div style="color:var(--text-dim);font-size:12px;font-family:var(--mono)">No open positions</div>';
+    }
+  } catch(e) {}
+}
+
+// ── P&L Tracker ──────────────────────────────────────────────────────────────
+async function loadPnL() {
+  try {
+    const res = await fetch(BASE + '/api/pnl');
+    const data = await res.json();
+    if (!data) return;
+    function renderPnL(id, val) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (val === null || val === undefined) { el.textContent = '—'; el.className = 'pnl-value neutral'; return; }
+      const isPos = val >= 0;
+      el.textContent = (isPos ? '+' : '') + '$' + Math.abs(val).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      el.className = 'pnl-value ' + (isPos ? 'positive' : 'negative');
+    }
+    renderPnL('pnl-daily', data.daily);
+    renderPnL('pnl-weekly', data.weekly);
+    renderPnL('pnl-monthly', data.monthly);
+    renderPnL('pnl-yearly', data.yearly);
+    const el = document.getElementById('pnl-updated');
+    if (el) el.textContent = new Date().toLocaleTimeString('en-US', {hour12:false});
+  } catch(e) {}
+}
+
 async function loadState() {
   try {
     const res = await fetch(BASE + '/api/state');
@@ -1058,26 +1188,6 @@ function renderState(s) {
   }
 }
 
-async function activateLicense() {
-  const key = document.getElementById('license-input').value.trim();
-  if (!key) { toast('Enter your Whop license key', 'red'); return; }
-  toast('Validating license...', 'amber');
-  try {
-    const res = await fetch(BASE + '/api/license', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ licenseKey: key })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      toast('License activated!');
-      document.getElementById('license-banner').style.display = 'none';
-      loadState();
-    } else {
-      toast('Invalid license: ' + (data.error || 'check your key'), 'red');
-    }
-  } catch(e) { toast('Error activating license', 'red'); }
-}
 
 async function saveContractSize() {
   const spy = parseInt(document.getElementById('input-spy-c').value) || 1;
@@ -1163,7 +1273,11 @@ function logout() {
 
 // Auto-refresh every 10 seconds
 loadState();
+loadLivePrices();
+loadPnL();
 setInterval(loadState, 10000);
+setInterval(loadLivePrices, 5000);
+setInterval(loadPnL, 30000);
 
 // Auth status check
 async function checkAuth() {
