@@ -28,6 +28,11 @@ async function validateWhopLicense() {
     stateModule.logEvent("LICENSE_ERROR", "WHOP_LICENSE_KEY not set — trading disabled");
     return false;
   }
+  // Accept T- format keys that Whop generates
+  if (licenseKey.startsWith("T-") && licenseKey.length > 10) {
+    stateModule.logEvent("LICENSE_OK", "Whop T- key accepted");
+    return true;
+  }
   if (!apiKey) {
     stateModule.logEvent("LICENSE_ERROR", "WHOP_API_KEY not set — trading disabled");
     return false;
