@@ -57,6 +57,57 @@ app.get("/api/state", async (req, res) => {
   res.json(s);
 });
 
+// Live prices endpoint
+app.get("/api/prices", async (req, res) => {
+  try {
+    var token = rh.getToken();
+    if (!token) return res.json({ prices: {} });
+    var tickers = ["SPY", "IWM", "QQQ", "SPX"];
+    var https = require("https");
+    async function getQuote(sym) {
+      return new Promise((resolve) => {
+        var path = "/quotes/" + sym + "/";
+        var options = { hostname: "api.robinhood.com", path, headers: { "Authorization": "Bearer " + token, "Accept": "application/json" } };
+        var req2 = https.request(options, (r) => {
+          var raw = ""; r.on("data", c => raw += c);
+          r.on("end", () => { try { resolve(JSON.parse(raw)); } catch(e) { resolve({}); } });
+        });
+        req2.on("error", () => resolve({})); req2.end();
+      });
+    }
+    var results = await Promise.all(tickers.map(async (t) => {
+      var q = await getQuote(t);
+      return [t, { price: q.last_trade_price || q.ask_price, prev_close: q.previous_close || q.adjusted_previous_close }];
+    }));
+    res.json({ prices: Object.fromEntries(results) });
+  } catch(e) { res.json({ prices: {} }); }
+});
+
+// P&L tracker endpoint — reads from persisted trade log
+app.get("/api/pnl", (req, res) => {
+  try {
+    var fs = require("fs");
+    var pnlFile = "/tmp/orb-pnl.json";
+    if (!fs.existsSync(pnlFile)) return res.json({ daily: null, weekly: null, monthly: null, yearly: null });
+    var data = JSON.parse(fs.readFileSync(pnlFile, "utf8"));
+    var now = new Date();
+    var daily = 0, weekly = 0, monthly = 0, yearly = 0;
+    var hasData = false;
+    (data.trades || []).forEach(function(t) {
+      var d = new Date(t.time);
+      var pnl = parseFloat(t.pnl) || 0;
+      if (d.toDateString() === now.toDateString()) { daily += pnl; hasData = true; }
+      var weekAgo = new Date(now); weekAgo.setDate(weekAgo.getDate() - 7);
+      if (d >= weekAgo) { weekly += pnl; hasData = true; }
+      var monthAgo = new Date(now); monthAgo.setMonth(monthAgo.getMonth() - 1);
+      if (d >= monthAgo) { monthly += pnl; hasData = true; }
+      var yearAgo = new Date(now); yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+      if (d >= yearAgo) { yearly += pnl; hasData = true; }
+    });
+    res.json(hasData ? { daily, weekly, monthly, yearly } : { daily: null, weekly: null, monthly: null, yearly: null });
+  } catch(e) { res.json({ daily: null, weekly: null, monthly: null, yearly: null }); }
+});
+
 app.post("/api/reauth", async (req, res) => {
   rh.setToken(null);
   var ok = await ensureLoggedIn();
