@@ -1,5 +1,6 @@
 var stateModule = require("../utils/state");
 var trayd = require("../utils/trayd");
+var orbUtil = require("../utils/orb");
 var fs = require("fs");
 
 function logTradePnL(ticker, side, entryPrice, exitPrice, contracts) {
@@ -13,6 +14,35 @@ function logTradePnL(ticker, side, entryPrice, exitPrice, contracts) {
     data.trades = data.trades.filter(function(t) { return new Date(t.time) >= yearAgo; });
     fs.writeFileSync(pnlFile, JSON.stringify(data));
   } catch(e) { console.log("[PNL_ERROR]", e.message); }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   DUPLICATE-SIGNAL PROTECTION
+   Root cause of repeated buying: position state was written AFTER an
+   awaited order placement (3-8s). Concurrent/retried webhooks all read
+   pos=null during that window and each fired a fresh entry.
+
+   Two guards, both evaluated SYNCHRONOUSLY before any await:
+     1. processing[ticker]  — in-flight lock; a duplicate that arrives while
+        an order is still being placed is dropped immediately.
+     2. lastSignal[key]     — cooldown; identical ticker+event within
+        DEDUP_WINDOW_MS is dropped. 30s absorbs TradingView retry storms
+        (~5s apart) while staying far below a genuine retest (>=5 min).
+   ────────────────────────────────────────────────────────────────────────── */
+var DEDUP_WINDOW_MS = parseInt(process.env.ORB_DEDUP_MS, 10) || 30000;
+var lastSignal = {};   // key "TICKER:event" -> epoch ms
+var processing = {};   // "TICKER" -> bool (order in flight)
+
+// Returns ms elapsed since the last identical signal if still inside the
+// cooldown window (always > 0 when blocked); otherwise records now and returns 0.
+function recentlySeen(ticker, event) {
+  var key = ticker + ":" + event;
+  var now = Date.now();
+  if (lastSignal[key] && (now - lastSignal[key]) < DEDUP_WINDOW_MS) {
+    return (now - lastSignal[key]) || 1;
+  }
+  lastSignal[key] = now;
+  return 0;
 }
 
 /*
@@ -35,6 +65,33 @@ async function handleAlert(payload) {
   if (!ticker || !event) throw new Error("Missing ticker or event");
   if (ticker !== "SPY" && ticker !== "IWM") throw new Error("Unknown ticker: " + ticker);
 
+  // Trade-placing events get duplicate protection. orb_set / informational do not.
+  var TRADE_EVENTS = ["breakout_long", "breakout_short", "stop_long", "stop_short", "expected_move_hit"];
+  var guarded = TRADE_EVENTS.indexOf(event) !== -1;
+  var lockedTickers = [];
+
+  if (guarded) {
+    if (processing[ticker]) {
+      stateModule.logEvent("DUP_BLOCKED", ticker + " " + event + " ignored — order already in progress");
+      return { ok: true, deduped: true, message: ticker + " " + event + " ignored (in progress)" };
+    }
+    var ago = recentlySeen(ticker, event);
+    if (ago > 0) {
+      stateModule.logEvent("DUP_BLOCKED", ticker + " " + event + " ignored — duplicate " + Math.round(ago / 1000) + "s ago");
+      return { ok: true, deduped: true, message: ticker + " " + event + " duplicate ignored (" + Math.round(ago / 1000) + "s)" };
+    }
+    processing[ticker] = true;
+    lockedTickers.push(ticker);
+  }
+
+  try {
+    return await processEvent(payload, ticker, event, lockedTickers);
+  } finally {
+    lockedTickers.forEach(function(t) { processing[t] = false; });
+  }
+}
+
+async function processEvent(payload, ticker, event, lockedTickers) {
   var s        = stateModule.getState();
   var pos      = stateModule.getPosition(ticker);
   var optPrice = payload.option_price ? parseFloat(payload.option_price) : null;
@@ -46,13 +103,17 @@ async function handleAlert(payload) {
   if (event === "orb_set") {
     if (orbHigh && orbLow) {
       stateModule.setORB(ticker, orbHigh, orbLow);
-      var orb = stateModule.getState().orb[ticker];
-      stateModule.logEvent("ORB_SET", ticker + " High=" + orb.high + " Low=" + orb.low + " Mid=" + orb.mid);
-    } else {
-      // Mark ORB as set even without levels — server will use chart data
-      stateModule.logEvent("ORB_SET", ticker + " ORB candle closed — waiting for breakout");
+      return { ok: true, message: ticker + " ORB set (from payload)" };
     }
-    return { ok: true, message: ticker + " ORB set" };
+    // No levels in payload — fetch the opening range ourselves so the
+    // dashboard populates and cross-entry arms.
+    var range = await orbUtil.fetchOpeningRange(ticker);
+    if (range && range.high && range.low) {
+      stateModule.setORB(ticker, range.high, range.low);
+      return { ok: true, message: ticker + " ORB set (fetched)" };
+    }
+    stateModule.logEvent("ORB_SET", ticker + " ORB candle closed — levels unavailable, waiting for breakout");
+    return { ok: true, message: ticker + " ORB set (no levels)" };
   }
 
   // ── STOP LOSS — LONG (close below mid) ───────────────────────────────────
@@ -92,18 +153,33 @@ async function handleAlert(payload) {
     }
 
     if (!pos || pos.stopped) {
+      // Write state BEFORE the await so any duplicate that slips past the
+      // lock still sees an open position instead of re-entering.
       stateModule.logEvent("ENTRY", ticker + " call @ breakout_long half=" + half + "/" + total);
-      var order = await trayd.placeOrder({ ticker: ticker, side: "call", contracts: half });
       stateModule.openHalfPosition(ticker, "call", half, optPrice || close || 0);
+      var order;
+      try {
+        order = await trayd.placeOrder({ ticker: ticker, side: "call", contracts: half });
+      } catch (e) {
+        stateModule.closePosition(ticker, "entry order failed");   // roll back on failure
+        throw e;
+      }
 
       // Cross-entry: IWM breaks before SPY
       var cross = null;
       var spyPos = stateModule.getPosition("SPY");
-      if (ticker === "IWM" && (!spyPos || spyPos.stopped) && s.orb.SPY.set) {
+      if (ticker === "IWM" && (!spyPos || spyPos.stopped) && s.orb.SPY.set && !processing["SPY"]) {
+        processing["SPY"] = true; lockedTickers.push("SPY");
+        recentlySeen("SPY", "breakout_long");
         var spyHalf = Math.ceil(s.contracts.SPY / 2);
         stateModule.logEvent("CROSS_ENTRY", "IWM breakout long → entering SPY call half=" + spyHalf);
-        cross = await trayd.placeOrder({ ticker: "SPY", side: "call", contracts: spyHalf });
         stateModule.openHalfPosition("SPY", "call", spyHalf, null);
+        try {
+          cross = await trayd.placeOrder({ ticker: "SPY", side: "call", contracts: spyHalf });
+        } catch (e) {
+          stateModule.closePosition("SPY", "cross entry failed");
+          stateModule.logEvent("CROSS_ERROR", "SPY cross entry failed: " + e.message);
+        }
       }
       return { ok: true, entry: order, cross: cross };
     }
@@ -112,8 +188,12 @@ async function handleAlert(payload) {
     if (pos.halfIn && !pos.stopped) {
       var addQty = pos.totalContracts;
       stateModule.logEvent("RETEST", ticker + " retest add " + addQty + "c");
-      await trayd.placeOrder({ ticker: ticker, side: "call", contracts: addQty });
       stateModule.addSecondHalf(ticker, addQty, optPrice || close || pos.entryPrice);
+      try {
+        await trayd.placeOrder({ ticker: ticker, side: "call", contracts: addQty });
+      } catch (e) {
+        stateModule.logEvent("RETEST_ERROR", ticker + " retest order failed: " + e.message);
+      }
       return { ok: true, message: ticker + " second half added on retest" };
     }
 
@@ -136,17 +216,30 @@ async function handleAlert(payload) {
 
     if (!pos || pos.stopped) {
       stateModule.logEvent("ENTRY", ticker + " put @ breakout_short half=" + half2 + "/" + total2);
-      var order2 = await trayd.placeOrder({ ticker: ticker, side: "put", contracts: half2 });
       stateModule.openHalfPosition(ticker, "put", half2, optPrice || close || 0);
+      var order2;
+      try {
+        order2 = await trayd.placeOrder({ ticker: ticker, side: "put", contracts: half2 });
+      } catch (e) {
+        stateModule.closePosition(ticker, "entry order failed");
+        throw e;
+      }
 
       // Cross-entry: IWM breaks before SPY
       var cross2 = null;
       var spyPos2 = stateModule.getPosition("SPY");
-      if (ticker === "IWM" && (!spyPos2 || spyPos2.stopped) && s.orb.SPY.set) {
+      if (ticker === "IWM" && (!spyPos2 || spyPos2.stopped) && s.orb.SPY.set && !processing["SPY"]) {
+        processing["SPY"] = true; lockedTickers.push("SPY");
+        recentlySeen("SPY", "breakout_short");
         var spyHalf2 = Math.ceil(s.contracts.SPY / 2);
         stateModule.logEvent("CROSS_ENTRY", "IWM breakout short → entering SPY put half=" + spyHalf2);
-        cross2 = await trayd.placeOrder({ ticker: "SPY", side: "put", contracts: spyHalf2 });
         stateModule.openHalfPosition("SPY", "put", spyHalf2, null);
+        try {
+          cross2 = await trayd.placeOrder({ ticker: "SPY", side: "put", contracts: spyHalf2 });
+        } catch (e) {
+          stateModule.closePosition("SPY", "cross entry failed");
+          stateModule.logEvent("CROSS_ERROR", "SPY cross entry failed: " + e.message);
+        }
       }
       return { ok: true, entry: order2, cross: cross2 };
     }
@@ -155,8 +248,12 @@ async function handleAlert(payload) {
     if (pos.halfIn && !pos.stopped) {
       var addQty2 = pos.totalContracts;
       stateModule.logEvent("RETEST", ticker + " retest add " + addQty2 + "c");
-      await trayd.placeOrder({ ticker: ticker, side: "put", contracts: addQty2 });
       stateModule.addSecondHalf(ticker, addQty2, optPrice || close || pos.entryPrice);
+      try {
+        await trayd.placeOrder({ ticker: ticker, side: "put", contracts: addQty2 });
+      } catch (e) {
+        stateModule.logEvent("RETEST_ERROR", ticker + " retest order failed: " + e.message);
+      }
       return { ok: true, message: ticker + " second half added on retest" };
     }
 
