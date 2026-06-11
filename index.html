@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ORB Trader">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#00e5a0">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>ORB Trader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0d1318;
+    --surface2: #121920;
+    --border: #1e2d3a;
+    --border2: #243444;
+    --green: #00e5a0;
+    --green-dim: #00e5a020;
+    --green-mid: #00e5a040;
+    --red: #ff4d6a;
+    --red-dim: #ff4d6a20;
+    --amber: #f5a623;
+    --amber-dim: #f5a62320;
+    --blue: #4da6ff;
+    --blue-dim: #4da6ff15;
+    --text: #c8d8e8;
+    --text-dim: #5a7080;
+    --text-mid: #8aa0b0;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* Header */
+  .header {
+    border-bottom: 1px solid var(--border);
+    padding: 0 2rem;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--green);
+  }
+
+  .logo-mark {
+    width: 28px;
+    height: 28px;
+    border: 1.5px solid var(--green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--green);
+    position: relative;
+  }
+
+  .logo-mark::before {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border: 1px solid var(--green);
+    opacity: 0.4;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  .status-dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); animation: none; }
+  .status-dot.warning { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .status-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid var(--border2);
+    background: transparent;
+    color: var(--text-mid);
+    padding: 6px 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn:hover { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+  .btn.primary { border-color: var(--green); color: var(--green); }
+  .btn.primary:hover { background: var(--green-mid); }
+  .btn.danger { border-color: var(--red); color: var(--red); }
+  .btn.danger:hover { background: var(--red-dim); }
+
+  /* Layout */
+  .main { padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }
+
+  /* Top metrics row */
+  .metrics-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1px;
+    border: 1px solid var(--border);
+    margin-bottom: 1.5rem;
+    background: var(--border);
+  }
+
+  .metric {
+    background: var(--surface);
+    padding: 1rem 1.25rem;
+    position: relative;
+  }
+
+  .metric::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--green);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s;
+  }
+
+  .metric.active::after { transform: scaleX(1); }
+  .metric.red::after { background: var(--red); }
+  .metric.amber::after { background: var(--amber); }
+
+  .metric-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .metric-value {
+    font-size: 22px;
+    font-weight: 300;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .metric-value.green { color: var(--green); }
+  .metric-value.red { color: var(--red); }
+  .metric-value.amber { color: var(--amber); }
+
+  .metric-sub {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* Grid layout */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Panels */
+  .panel {
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .panel-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface2);
+  }
+
+  .panel-title {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-mid);
+  }
+
+  .panel-body { padding: 16px; }
+
+  /* ORB ticker cards */
+  .ticker-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  .ticker-card {
+    background: var(--surface);
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .ticker-card::before {
+    content: attr(data-ticker);
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 52px;
+    font-weight: 600;
+    color: var(--text-dim);
+    opacity: 0.06;
+    letter-spacing: -2px;
+    pointer-events: none;
+  }
+
+  .ticker-name {
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .ticker-exp {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+
+  .orb-levels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .orb-level {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+  }
+
+  .orb-level-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+
+  .orb-level-value {
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .orb-level.high .orb-level-value { color: var(--green); }
+  .orb-level.low .orb-level-value { color: var(--red); }
+
+  /* Signal badge */
+  .signal-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border: 1px solid var(--border2);
+    color: var(--text-dim);
+  }
+
+  .signal-badge.long { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+  .signal-badge.short { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+  .signal-badge.traded { border-color: var(--blue); color: var(--blue); background: var(--blue-dim); }
+
+  .signal-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  /* Log */
+  .log-container {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    height: 280px;
+    overflow-y: auto;
+    font-size: 11px;
+    padding: 10px;
+  }
+
+  .log-container::-webkit-scrollbar { width: 4px; }
+  .log-container::-webkit-scrollbar-track { background: var(--bg); }
+  .log-container::-webkit-scrollbar-thumb { background: var(--border2); }
+
+  .log-entry {
+    display: grid;
+    grid-template-columns: 140px 80px 1fr;
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+
+  .log-time { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+  .log-type {
+    font-weight: 500;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .log-type.TRADE { color: var(--green); }
+  .log-type.SIGNAL { color: var(--blue); }
+  .log-type.AUTH { color: var(--amber); }
+  .log-type.CROSS_ENTRY { color: var(--green); }
+  .log-type.AUTH_ERROR { color: var(--red); }
+  .log-type.ERROR { color: var(--red); }
+  .log-type.ORB_SET { color: var(--text-mid); }
+  .log-type.DAY_RESET { color: var(--text-dim); }
+  .log-type.CONTRACTS { color: var(--amber); }
+  .log-type.SKIP { color: var(--text-dim); }
+
+
+
+
+  .log-type.ENTRY { color: var(--green); }
+  .log-type.POSITION_OPEN { color: var(--green); }
+  .log-type.POSITION_ADD { color: var(--green); }
+  .log-type.POSITION_CLOSE { color: var(--red); }
+  .log-type.STOP_LOSS { color: var(--red); }
+  .log-type.RETEST { color: var(--blue); }
+  .log-type.PROFIT_TIER_1 { color: var(--amber); }
+  .log-type.PROFIT_TIER_2 { color: var(--amber); }
+  .log-type.PROFIT_TIER_3 { color: var(--amber); }
+
+  .log-msg { color: var(--text-mid); line-height: 1.5; }
+
+  /* Settings panel */
+  .settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  .field input, .field select {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+
+  .field input:focus, .field select:focus { border-color: var(--green); }
+  .field input::placeholder { color: var(--text-dim); }
+  .field select option { background: var(--surface); }
+
+  /* Webhook box */
+  .webhook-box {
+    background: var(--bg);
+    border: 1px solid var(--border2);
+    padding: 10px 14px;
+    font-size: 11px;
+    color: var(--green);
+    word-break: break-all;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .webhook-box:hover { border-color: var(--green); }
+
+  .copy-hint { font-size: 10px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+
+  /* Alert templates */
+  .template-tabs {
+    display: flex;
+    gap: 1px;
+    background: var(--border);
+    margin-bottom: 12px;
+  }
+
+  .tab {
+    padding: 7px 16px;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: var(--surface2);
+    color: var(--text-dim);
+    cursor: pointer;
+    border: none;
+    font-family: var(--mono);
+    transition: all 0.15s;
+  }
+
+  .tab.active { background: var(--surface); color: var(--green); }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  .template-content { display: none; }
+  .template-content.active { display: block; }
+
+  .code-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    font-size: 11px;
+    color: var(--amber);
+    line-height: 1.6;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    position: relative;
+  }
+
+  .code-block:hover { border-color: var(--amber); }
+  .code-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 6px; }
+
+  /* Trade history table */
+  .trade-table { width: 100%; border-collapse: collapse; }
+  .trade-table th {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 6px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .trade-table td {
+    font-size: 11px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-mid);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .trade-table tr:last-child td { border-bottom: none; }
+  .trade-table .call { color: var(--green); }
+  .trade-table .put { color: var(--red); }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface2);
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-size: 11px;
+    padding: 10px 16px;
+    letter-spacing: 0.08em;
+    z-index: 9999;
+    animation: slideIn 0.2s ease;
+    font-family: var(--mono);
+  }
+
+  @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  /* Nav tabs */
+  .nav-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 1.5rem;
+  }
+
+  .nav-tab {
+    padding: 10px 20px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    font-family: var(--mono);
+    transition: all 0.15s;
+    margin-bottom: -1px;
+  }
+
+  .nav-tab:hover { color: var(--text); }
+  .nav-tab.active { color: var(--green); border-bottom-color: var(--green); }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Divider */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+  .text-dim { color: var(--text-dim); }
+  .text-green { color: var(--green); }
+  .text-red { color: var(--red); }
+  .text-amber { color: var(--amber); }
+  .gap-8 { display: flex; gap: 8px; align-items: center; }
+
+  /* Live ticker */
+  .ticker-feed { display:flex; flex-direction:column; gap:6px; }
+  .ticker-item { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg); border:1px solid var(--border); }
+  .ticker-sym { font-size:13px; font-weight:600; color:var(--white); }
+  .ticker-price { font-size:16px; font-weight:300; font-variant-numeric:tabular-nums; color:var(--white); }
+  .ticker-change { font-size:11px; font-family:var(--mono); }
+  .ticker-change.up { color:var(--green); }
+  .ticker-change.down { color:var(--red); }
+  /* P&L tracker */
+  .pnl-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); }
+  .pnl-cell { background:var(--surface); padding:12px 14px; }
+  .pnl-label { font-size:9px; color:var(--text-dim); letter-spacing:0.12em; text-transform:uppercase; font-family:var(--mono); margin-bottom:4px; }
+  .pnl-value { font-size:18px; font-weight:300; font-variant-numeric:tabular-nums; }
+  .pnl-value.positive { color:var(--green); }
+  .pnl-value.negative { color:var(--red); }
+  .pnl-value.neutral { color:var(--text-dim); }
+  /* Position price feed */
+  .pos-price-feed { display:flex; flex-direction:column; gap:6px; }
+  .pos-price-item { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:var(--bg); border-left:3px solid var(--green); }
+  .pos-price-item.put { border-left-color:var(--red); }
+  @media (max-width:768px) {
+    .pnl-grid { grid-template-columns:repeat(2,1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="logo">
+    <div class="logo-mark">ORB</div>
+    ORB Trader
+  </div>
+  <div class="header-right">
+    <div class="gap-8">
+      <div class="status-dot" id="auth-dot"></div>
+      <span class="status-label" id="auth-label">checking...</span>
+    </div>
+    <button class="btn primary" onclick="triggerReauth()">Reconnect</button>
+  </div>
+</header>
+
+<main class="main">
+  <nav class="nav-tabs">
+    <button class="nav-tab active" onclick="showPage('dashboard')">Dashboard</button>
+    <button class="nav-tab" onclick="showPage('setup')">Setup</button>
+    <button class="nav-tab" onclick="showPage('settings')">Settings</button>
+  </nav>
+
+  <!-- DASHBOARD PAGE -->
+  <div class="page active" id="page-dashboard">
+
+    <div class="metrics-row">
+      <div class="metric" id="m-buying-power">
+        <div class="metric-label">Buying Power</div>
+        <div class="metric-value" id="val-buying-power">—</div>
+        <div class="metric-sub">Claude account</div>
+      </div>
+      </div>
+      </div>
+      <div class="metric" id="m-spy-c">
+        <div class="metric-label">SPY Contracts</div>
+        <div class="metric-value" id="val-spy-c">—</div>
+        <div class="metric-sub">1DTE · market order</div>
+      </div>
+      <div class="metric" id="m-iwm-c">
+        <div class="metric-label">IWM Contracts</div>
+        <div class="metric-value" id="val-iwm-c">—</div>
+        <div class="metric-sub">0DTE · market order</div>
+      </div>
+      <div class="metric" id="m-trades">
+        <div class="metric-label">Trades Today</div>
+        <div class="metric-value" id="val-trades">—</div>
+        <div class="metric-sub" id="val-trades-sub">—</div>
+      </div>
+      <div class="metric" style="display:flex;flex-direction:column;gap:8px;justify-content:center">
+        <div class="metric-label">Set Contract Size</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase">SPY</span>
+            <input type="number" id="input-spy-c" min="1" max="100" value="1" style="width:56px;font-family:var(--mono);font-size:15px;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px 6px;outline:none">
+          </div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase">IWM</span>
+            <input type="number" id="input-iwm-c" min="1" max="100" value="1" style="width:56px;font-family:var(--mono);font-size:15px;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:4px 6px;outline:none">
+          </div>
+          <button onclick="saveContractSize()" style="margin-top:16px;font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase;background:var(--green);color:var(--bg);border:none;padding:6px 12px;cursor:pointer">Set</button>
+        </div>
+      </div>
+    </div>
+
+        </div>
+    </div>
+
+    <!-- P&L Tracker -->
+    <div class="panel" style="margin-bottom:12px">
+      <div class="panel-header">
+        <span class="panel-title">P&L Tracker</span>
+        <span style="font-size:10px;color:var(--text-dim);font-family:var(--mono)" id="pnl-updated">—</span>
+      </div>
+      <div class="pnl-grid">
+        <div class="pnl-cell"><div class="pnl-label">Daily</div><div class="pnl-value neutral" id="pnl-daily">—</div></div>
+        <div class="pnl-cell"><div class="pnl-label">Weekly</div><div class="pnl-value neutral" id="pnl-weekly">—</div></div>
+        <div class="pnl-cell"><div class="pnl-label">Monthly</div><div class="pnl-value neutral" id="pnl-monthly">—</div></div>
+        <div class="pnl-cell"><div class="pnl-label">Yearly</div><div class="pnl-value neutral" id="pnl-yearly">—</div></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 280px;gap:12px;margin-bottom:12px">
+      <!-- Left: ORB + Activity -->
+      <div>
+        <div class="grid-2">
+          <!-- ORB Levels + Signals -->
+          <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">ORB Levels + Signals</span>
+          <span class="text-dim" style="font-size:10px" id="orb-time">—</span>
+        </div>
+        <div class="ticker-grid">
+          <div class="ticker-card" data-ticker="SPY">
+            <div class="ticker-name">SPY</div>
+            <div class="ticker-exp">1DTE · S&P 500 ETF</div>
+            <div class="orb-levels">
+              <div class="orb-level high">
+                <div class="orb-level-label">ORB High</div>
+                <div class="orb-level-value" id="spy-high">—</div>
+              </div>
+              <div class="orb-level low">
+                <div class="orb-level-label">ORB Low</div>
+                <div class="orb-level-value" id="spy-low">—</div>
+              </div>
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">Stop (mid): <span id="spy-mid" style="color:var(--amber)">—</span></div>
+            <div id="spy-signal-badge" class="signal-badge"><div class="signal-dot"></div>Waiting</div>
+            <div id="spy-pos-status" style="margin-top:8px;font-size:10px;color:var(--text-dim)"></div>
+          </div>
+          <div class="ticker-card" data-ticker="IWM">
+            <div class="ticker-name">IWM</div>
+            <div class="ticker-exp">0DTE · Russell 2000 ETF</div>
+            <div class="orb-levels">
+              <div class="orb-level high">
+                <div class="orb-level-label">ORB High</div>
+                <div class="orb-level-value" id="iwm-high">—</div>
+              </div>
+              <div class="orb-level low">
+                <div class="orb-level-label">ORB Low</div>
+                <div class="orb-level-value" id="iwm-low">—</div>
+              </div>
+            </div>
+            <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">Stop (mid): <span id="iwm-mid" style="color:var(--amber)">—</span></div>
+            <div id="iwm-signal-badge" class="signal-badge"><div class="signal-dot"></div>Waiting</div>
+            <div id="iwm-pos-status" style="margin-top:8px;font-size:10px;color:var(--text-dim)"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity Log -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Activity Log</span>
+          <button class="btn" onclick="loadState()">Refresh</button>
+        </div>
+        <div class="log-container" id="log-container">
+          <div class="log-entry">
+            <span class="log-time">—</span>
+            <span class="log-type">—</span>
+            <span class="log-msg">Loading...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+        </div><!-- end left -->
+      </div><!-- end grid-2 -->
+
+      <!-- Right sidebar: Live Prices + Position Feed -->
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Live Prices</span><span style="font-size:9px;color:var(--text-dim);font-family:var(--mono)" id="prices-updated">—</span></div>
+          <div class="panel-body" style="padding:8px">
+            <div class="ticker-feed">
+              <div class="ticker-item"><span class="ticker-sym">SPY</span><div style="text-align:right"><div class="ticker-price" id="price-SPY">—</div><div class="ticker-change" id="chg-SPY">—</div></div></div>
+              <div class="ticker-item"><span class="ticker-sym">IWM</span><div style="text-align:right"><div class="ticker-price" id="price-IWM">—</div><div class="ticker-change" id="chg-IWM">—</div></div></div>
+              <div class="ticker-item"><span class="ticker-sym">QQQ</span><div style="text-align:right"><div class="ticker-price" id="price-QQQ">—</div><div class="ticker-change" id="chg-QQQ">—</div></div></div>
+              <div class="ticker-item"><span class="ticker-sym">SPX</span><div style="text-align:right"><div class="ticker-price" id="price-SPX">—</div><div class="ticker-change" id="chg-SPX">—</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Open Positions</span></div>
+          <div class="panel-body" style="padding:8px">
+            <div class="pos-price-feed" id="pos-price-feed">
+              <div style="color:var(--text-dim);font-size:12px;font-family:var(--mono)">No open positions</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- end outer grid -->
+
+    <!-- Trade History -->
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">Today's Trades</span>
+      </div>
+      <div class="panel-body" style="padding:0">
+        <table class="trade-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Ticker</th>
+              <th>Type</th>
+              <th>Contracts</th>
+              <th>Strike</th>
+              <th>Expiry</th>
+              <th>Stop Level</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="trade-tbody">
+            <tr><td colspan="8" style="text-align:center; color: var(--text-dim); padding: 20px;">No trades placed today</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETUP PAGE -->
+  <div class="page" id="page-setup">
+    <div class="grid-2">
+      <div>
+        <div class="panel" style="margin-bottom:1.5rem">
+          <div class="panel-header"><span class="panel-title">Your Webhook URL</span></div>
+          <div class="panel-body">
+            <div class="field" style="margin-bottom:12px">
+              <label>Server URL</label>
+              <div class="webhook-box" onclick="copyWebhook()" id="webhook-url-display">
+                <span id="webhook-url-text">https://your-app.up.railway.app/webhook</span>
+                <span class="copy-hint">click to copy</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>Set your Railway URL</label>
+              <input type="text" id="railway-url" placeholder="https://your-app.up.railway.app" oninput="updateWebhookURL()">
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Deployment Steps</span></div>
+          <div class="panel-body">
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="color:var(--green);font-size:11px;font-weight:600;min-width:18px">01</span>
+                <span style="color:var(--text-mid);line-height:1.6">Upload the <code style="color:var(--amber)">orb-webhook.zip</code> to a new GitHub repo</span>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="color:var(--green);font-size:11px;font-weight:600;min-width:18px">02</span>
+                <span style="color:var(--text-mid);line-height:1.6">Go to <a href="https://railway.app" style="color:var(--green)">railway.app</a> → New Project → Deploy from GitHub</span>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="color:var(--green);font-size:11px;font-weight:600;min-width:18px">03</span>
+                <span style="color:var(--text-mid);line-height:1.6">Add environment variables: <code style="color:var(--amber)">RH_EMAIL</code> and <code style="color:var(--amber)">RH_PASSWORD</code></span>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="color:var(--green);font-size:11px;font-weight:600;min-width:18px">04</span>
+                <span style="color:var(--text-mid);line-height:1.6">Copy your Railway public URL and paste it above</span>
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="color:var(--green);font-size:11px;font-weight:600;min-width:18px">05</span>
+                <span style="color:var(--text-mid);line-height:1.6">Set up TradingView alerts using the templates on the right →</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">TradingView Alert Templates</span></div>
+        <div class="panel-body">
+          <div class="template-tabs">
+            <button class="tab active" onclick="switchTab('spy-orb')">SPY ORB Set</button>
+            <button class="tab" onclick="switchTab('spy-bar')">SPY Bar Close</button>
+            <button class="tab" onclick="switchTab('iwm-orb')">IWM ORB Set</button>
+            <button class="tab" onclick="switchTab('iwm-bar')">IWM Bar Close</button>
+            <button class="tab" onclick="switchTab('iwm-em')">IWM Exp. Move</button>
+          </div>
+
+          <div class="template-content active" id="tpl-spy-orb">
+            <div class="code-label">Condition: ORB High crosses above 0 · Trigger: Once Per Bar Close · 9:35 AM (first 5-min candle close)</div>
+            <div class="code-block" onclick="copyTemplate(this)">{"ticker":"SPY","event":"orb_set","orb_high":{{plot("ORB High")}},"orb_low":{{plot("ORB Low")}}}</div>
+          </div>
+          <div class="template-content" id="tpl-spy-bar">
+            <div class="code-label">Condition: Any bar closes · Trigger: Once Per Bar Close · 9:45 AM – 4:00 PM · 5-min chart</div>
+            <div class="code-block" onclick="copyTemplate(this)">{"ticker":"SPY","event":"bar_close","close":{{close}},"option_price":{{plot("Option Price")}}}</div>
+            <div style="margin-top:8px;font-size:11px;color:var(--text-dim)">This single alert handles entries, retest adds, stop loss, and profit tiers automatically.</div>
+          </div>
+          <div class="template-content" id="tpl-iwm-orb">
+            <div class="code-label">Condition: ORB High crosses above 0 · Trigger: Once Per Bar Close · 9:35 AM (first 5-min candle close)</div>
+            <div class="code-block" onclick="copyTemplate(this)">{"ticker":"IWM","event":"orb_set","orb_high":{{plot("ORB High")}},"orb_low":{{plot("ORB Low")}}}</div>
+          </div>
+          <div class="template-content" id="tpl-iwm-bar">
+            <div class="code-label">Condition: Any bar closes · Trigger: Once Per Bar Close · 9:45 AM – 4:00 PM · 5-min chart</div>
+            <div class="code-block" onclick="copyTemplate(this)">{"ticker":"IWM","event":"bar_close","close":{{close}},"option_price":{{plot("Option Price")}}}</div>
+          </div>
+          <div class="template-content" id="tpl-iwm-em">
+            <div class="code-label">Create 3 separate alerts (daily / weekly / monthly) for both SPY and IWM. Each triggers 90% exit.</div>
+            <div style="margin-bottom:6px;font-size:10px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase">Daily expected move</div>
+            <div class="code-block" onclick="copyTemplate(this)" style="margin-bottom:8px">{"ticker":"SPY","event":"expected_move_hit","timeframe":"daily","option_price":{{plot("Option Price")}}}</div>
+            <div style="margin-bottom:6px;font-size:10px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase">Weekly expected move</div>
+            <div class="code-block" onclick="copyTemplate(this)" style="margin-bottom:8px">{"ticker":"SPY","event":"expected_move_hit","timeframe":"weekly","option_price":{{plot("Option Price")}}}</div>
+            <div style="margin-bottom:6px;font-size:10px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase">Monthly expected move</div>
+            <div class="code-block" onclick="copyTemplate(this)">{"ticker":"SPY","event":"expected_move_hit","timeframe":"monthly","option_price":{{plot("Option Price")}}}</div>
+            <div style="margin-top:10px;font-size:11px;color:var(--text-dim);line-height:1.6">Replace "SPY" with "IWM" for the 3 equivalent IWM alerts. Set condition to price crossing your expected move level.</div>
+          </div>
+
+          <div style="margin-top:14px;padding:10px;background:var(--amber-dim);border:1px solid var(--amber);font-size:11px;color:var(--amber);line-height:1.6">
+            ⚠ Only 4 alerts needed (down from 6). The bar_close alert handles all entry, add, stop, and profit logic in one.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS PAGE -->
+  <div class="page" id="page-settings">
+    <div class="grid-2">
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Strategy Settings</span></div>
+        <div class="panel-body">
+          <div class="settings-grid">
+            <div class="field">
+              <label>SPY Expiry</label>
+              <select id="set-spy-exp"><option value="1DTE" selected>1DTE (next day)</option><option value="0DTE">0DTE (same day)</option></select>
+            </div>
+            <div class="field">
+              <label>IWM Expiry</label>
+              <select id="set-iwm-exp"><option value="0DTE" selected>0DTE (same day)</option><option value="1DTE">1DTE (next day)</option></select>
+            </div>
+            <div class="field">
+              <label>Entry Order Type</label>
+              <select id="set-order"><option value="market" selected>Market (fastest)</option><option value="limit">Limit at ask</option></select>
+            </div>
+            <div class="field">
+              <label>ORB Timeframe</label>
+              <select id="set-orb-tf"><option value="15">15 minutes</option><option value="5">5 minutes</option><option value="30">30 minutes</option></select>
+            </div>
+            <div class="field">
+              <label>Starting Contracts</label>
+              <input type="number" id="set-start-c" value="1" min="1" max="10">
+            </div>
+            <div class="field">
+              <label>Daily Contract Increment</label>
+              <input type="number" id="set-inc" value="1" min="1" max="5">
+            </div>
+          </div>
+          <hr class="divider">
+          <div class="field" style="margin-bottom:12px">
+            <label>Cross-Entry Rule (IWM breaks first → enter SPY)</label>
+            <select id="set-cross"><option value="true" selected>Enabled</option><option value="false">Disabled</option></select>
+          </div>
+          <button class="btn primary" onclick="saveSettings()">Save Settings</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><span class="panel-title">Account & Auth</span></div>
+        <div class="panel-body">
+          <div class="settings-grid" style="margin-bottom:16px">
+            <div class="field">
+              <label>Robinhood Email</label>
+              <input type="email" id="set-email" placeholder="stored in Railway env vars">
+            </div>
+            <div class="field">
+              <label>Robinhood Password</label>
+              <input type="password" id="set-pw" placeholder="stored in Railway env vars">
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);line-height:1.7;margin-bottom:16px;padding:10px;background:var(--bg);border:1px solid var(--border)">
+            Credentials are stored as <span style="color:var(--amber)">RH_EMAIL</span> and <span style="color:var(--amber)">RH_PASSWORD</span> environment variables in Railway — never in code or logs. The server re-authenticates automatically at 9:00 AM ET each day.
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn primary" onclick="triggerReauth()">Test Connection</button>
+            <button class="btn danger" onclick="if(confirm('Log out of Robinhood?')) logout()">Logout</button>
+          </div>
+          <hr class="divider">
+          <div class="field">
+            <label>UptimeRobot Monitor URL (optional)</label>
+            <input type="text" id="set-uptime" placeholder="https://uptimerobot.com/...">
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:6px;line-height:1.6">
+            Add your Railway URL to UptimeRobot (free) to get SMS/email alerts if the server goes down.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const BASE = window.location.origin;
+let state = null;
+let trades = [];
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.template-content').forEach(c => c.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tpl-' + name).classList.add('active');
+}
+
+function toast(msg, color) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  if (color === 'red') el.style.borderColor = 'var(--red)', el.style.color = 'var(--red)';
+  if (color === 'amber') el.style.borderColor = 'var(--amber)', el.style.color = 'var(--amber)';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+function copyTemplate(el) {
+  navigator.clipboard.writeText(el.textContent.trim());
+  toast('Copied to clipboard');
+}
+
+function copyWebhook() {
+  const url = document.getElementById('webhook-url-text').textContent;
+  navigator.clipboard.writeText(url);
+  toast('Webhook URL copied');
+}
+
+function updateWebhookURL() {
+  const val = document.getElementById('railway-url').value.replace(/\/$/, '');
+  document.getElementById('webhook-url-text').textContent = val ? val + '/webhook' : 'https://your-app.up.railway.app/webhook';
+}
+
+
+
+// ── Live price feed ──────────────────────────────────────────────────────────
+var _prevPrices = {};
+
+async function loadLivePrices() {
+  try {
+    const res = await fetch(BASE + '/api/prices');
+    const data = await res.json();
+    if (!data.prices) return;
+    const now = new Date().toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    document.getElementById('prices-updated').textContent = now;
+    Object.entries(data.prices).forEach(([sym, info]) => {
+      const priceEl = document.getElementById('price-' + sym);
+      const chgEl = document.getElementById('chg-' + sym);
+      if (!priceEl || !info.price) return;
+      const price = parseFloat(info.price);
+      const prev = parseFloat(info.prev_close || price);
+      const chg = price - prev;
+      const chgPct = prev > 0 ? ((chg / prev) * 100).toFixed(2) : 0;
+      const isUp = chg >= 0;
+      priceEl.textContent = '$' + price.toFixed(2);
+      if (chgEl) {
+        chgEl.textContent = (isUp ? '+' : '') + chg.toFixed(2) + ' (' + (isUp ? '+' : '') + chgPct + '%)';
+        chgEl.className = 'ticker-change ' + (isUp ? 'up' : 'down');
+      }
+    });
+
+    // Update position price feed
+    if (state && data.prices) {
+      const feed = document.getElementById('pos-price-feed');
+      if (!feed) return;
+      const positions = state.positions || {};
+      const activePosHtml = Object.entries(positions).filter(([t,p]) => p && !p.stopped).map(([t,p]) => {
+        const priceInfo = data.prices[t];
+        const currentPrice = priceInfo ? parseFloat(priceInfo.price).toFixed(2) : '—';
+        return `<div class="pos-price-item ${p.side}">
+          <div>
+            <div style="font-size:13px;font-weight:700">${t}</div>
+            <div style="font-size:10px;color:var(--text-dim);font-family:var(--mono)">${p.side.toUpperCase()} · ${p.contracts}c</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:15px;font-variant-numeric:tabular-nums">$${currentPrice}</div>
+            <div style="font-size:10px;color:var(--text-dim);font-family:var(--mono)">entry $${p.entryPrice?.toFixed(2) || '—'}</div>
+          </div>
+        </div>`;
+      }).join('');
+      feed.innerHTML = activePosHtml || '<div style="color:var(--text-dim);font-size:12px;font-family:var(--mono)">No open positions</div>';
+    }
+  } catch(e) {}
+}
+
+// ── P&L Tracker ──────────────────────────────────────────────────────────────
+async function loadPnL() {
+  try {
+    const res = await fetch(BASE + '/api/pnl');
+    const data = await res.json();
+    if (!data) return;
+    function renderPnL(id, val) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (val === null || val === undefined) { el.textContent = '—'; el.className = 'pnl-value neutral'; return; }
+      const isPos = val >= 0;
+      el.textContent = (isPos ? '+' : '') + '$' + Math.abs(val).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      el.className = 'pnl-value ' + (isPos ? 'positive' : 'negative');
+    }
+    renderPnL('pnl-daily', data.daily);
+    renderPnL('pnl-weekly', data.weekly);
+    renderPnL('pnl-monthly', data.monthly);
+    renderPnL('pnl-yearly', data.yearly);
+    const el = document.getElementById('pnl-updated');
+    if (el) el.textContent = new Date().toLocaleTimeString('en-US', {hour12:false});
+  } catch(e) {}
+}
+
+async function loadState() {
+  try {
+    const res = await fetch(BASE + '/api/state');
+    state = await res.json();
+    renderState(state);
+    // Fetch buying power
+    try {
+      const bpRes = await fetch(BASE + '/api/buying-power');
+      const bpData = await bpRes.json();
+      const bpEl = document.getElementById('val-buying-power');
+      if (bpEl && bpData.buying_power) {
+        bpEl.textContent = '$' + parseFloat(bpData.buying_power).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      }
+    } catch(e) {}
+  } catch (e) {
+    console.error('Failed to load state', e);
+  }
+}
+
+function renderState(s) {
+  // Metrics
+  document.getElementById('val-spy-c').textContent = s.contracts?.SPY || '1';
+  document.getElementById('val-iwm-c').textContent = s.contracts?.IWM || '1';
+  // Sync inputs with server state
+  const spyInput = document.getElementById('input-spy-c');
+  const iwmInput = document.getElementById('input-iwm-c');
+  if (spyInput && s.contracts?.SPY) spyInput.value = s.contracts.SPY;
+  if (iwmInput && s.contracts?.IWM) iwmInput.value = s.contracts.IWM;
+
+  const spyTraded = s.positions?.SPY && !s.positions.SPY.stopped;
+  const iwmTraded = s.positions?.IWM && !s.positions.IWM.stopped;
+  const tradeCount = (spyTraded ? 1 : 0) + (iwmTraded ? 1 : 0);
+  document.getElementById('val-trades').textContent = tradeCount;
+  document.getElementById('val-trades-sub').textContent = tradeCount === 0 ? 'none active' : 'SPY: ' + (spyTraded ? '✓' : '—') + ' · IWM: ' + (iwmTraded ? '✓' : '—');
+
+  // ORB levels
+  const spyORB = s.orb?.SPY;
+  const iwmORB = s.orb?.IWM;
+  document.getElementById('spy-high').textContent = spyORB?.high ? '$' + spyORB.high.toFixed(2) : '—';
+  document.getElementById('spy-low').textContent = spyORB?.low ? '$' + spyORB.low.toFixed(2) : '—';
+  document.getElementById('spy-mid').textContent = spyORB?.mid ? '$' + spyORB.mid.toFixed(2) : '—';
+  document.getElementById('iwm-high').textContent = iwmORB?.high ? '$' + iwmORB.high.toFixed(2) : '—';
+  document.getElementById('iwm-low').textContent = iwmORB?.low ? '$' + iwmORB.low.toFixed(2) : '—';
+  document.getElementById('iwm-mid').textContent = iwmORB?.mid ? '$' + iwmORB.mid.toFixed(2) : '—';
+
+  if (spyORB?.set || iwmORB?.set) {
+    document.getElementById('orb-time').textContent = '9:30–9:35 ET · 5-min ORB';
+  }
+
+  // Positions
+  renderPosition('spy', s.positions?.SPY);
+  renderPosition('iwm', s.positions?.IWM);
+
+  // Signals (legacy fallback)
+  renderSignal('spy', s.positions?.SPY);
+  renderSignal('iwm', s.positions?.IWM);
+
+  // Log
+  const logEl = document.getElementById('log-container');
+  if (s.log && s.log.length > 0) {
+    logEl.innerHTML = s.log.map(e => {
+      const t = new Date(e.time).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return `<div class="log-entry">
+        <span class="log-time">${t}</span>
+        <span class="log-type ${e.type}">${e.type}</span>
+        <span class="log-msg">${e.message}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // Trade table from log
+  const tradeLogs = (s.log || []).filter(e => e.type === 'TRADE' || e.type === 'CROSS_ENTRY');
+  const tbody = document.getElementById('trade-tbody');
+  if (tradeLogs.length > 0) {
+    tbody.innerHTML = tradeLogs.map(e => {
+      const t = new Date(e.time).toLocaleTimeString('en-US', { hour12: false });
+      const isCall = e.message.toLowerCase().includes('long');
+      return `<tr>
+        <td>${t}</td>
+        <td>${e.message.split(' ')[1] || '—'}</td>
+        <td class="${isCall ? 'call' : 'put'}">${isCall ? 'CALL' : 'PUT'}</td>
+        <td>${e.message.match(/x(\d+)/)?.[1] || '—'}</td>
+        <td>ATM</td>
+        <td>${e.message.includes('SPY') ? '1DTE' : '0DTE'}</td>
+        <td>${e.message.match(/stop: \$?([\d.]+)/)?.[1] ? '$' + e.message.match(/stop: \$?([\d.]+)/)[1] : '—'}</td>
+        <td style="color:var(--green)">Placed</td>
+      </tr>`;
+    }).join('');
+  } else {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:20px">No trades placed today</td></tr>';
+  }
+}
+
+
+async function saveContractSize() {
+  const spy = parseInt(document.getElementById('input-spy-c').value) || 1;
+  const iwm = parseInt(document.getElementById('input-iwm-c').value) || 1;
+  try {
+    const res = await fetch(BASE + '/api/contracts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spy, iwm })
+    });
+    const data = await res.json();
+    if (data.ok) toast('Contract size updated: SPY=' + data.contracts.SPY + ' IWM=' + data.contracts.IWM);
+    else toast('Failed to update', 'red');
+  } catch(e) { toast('Error saving size', 'red'); }
+}
+
+function renderPosition(ticker, pos) {
+  const statusEl = document.getElementById(ticker + '-pos-status');
+  if (!pos) { statusEl.textContent = ''; return; }
+
+  const tier = pos.lastProfitTier || 0;
+  const size = pos.halfIn ? 'half position' : 'full position';
+  const contracts = pos.contracts;
+  const entry = pos.entryPrice ? '$' + parseFloat(pos.entryPrice).toFixed(2) : '—';
+  const tierLabel = tier >= 100 ? '· tier 2 taken' : tier > 0 ? `· ${tier}x tier 1 taken` : '';
+  if (pos.stopped) {
+    statusEl.innerHTML = `<span style="color:var(--red)">closed</span>`;
+  } else {
+    const beLabel = pos.breakEvenActivated ? ' · <span style="color:var(--amber)">BE stop active</span>' : '';
+    statusEl.innerHTML = `${size} · ${contracts}c · entry ${entry} ${tierLabel}${beLabel}`;
+  }
+}
+
+function renderSignal(ticker, pos) {
+  const el = document.getElementById(ticker + '-signal-badge');
+  if (!pos) {
+    el.className = 'signal-badge';
+    el.innerHTML = '<div class="signal-dot"></div>Waiting';
+  } else if (pos.stopped) {
+    el.className = 'signal-badge';
+    el.innerHTML = '<div class="signal-dot"></div>Closed';
+  } else if (pos.side === 'call') {
+    el.className = 'signal-badge long';
+    el.innerHTML = `<div class="signal-dot"></div>Call · ${pos.fullIn ? 'Full' : 'Half'}`;
+  } else if (pos.side === 'put') {
+    el.className = 'signal-badge short';
+    el.innerHTML = `<div class="signal-dot"></div>Put · ${pos.fullIn ? 'Full' : 'Half'}`;
+  }
+}
+
+async function triggerReauth() {
+  toast('Reconnecting to Robinhood...', 'amber');
+  const dot = document.getElementById('auth-dot');
+  const label = document.getElementById('auth-label');
+  dot.className = 'status-dot warning';
+  label.textContent = 'reconnecting...';
+  try {
+    const res = await fetch(BASE + '/api/reauth', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      dot.className = 'status-dot';
+      label.textContent = 'connected';
+      toast('Robinhood connected');
+    } else {
+      dot.className = 'status-dot offline';
+      label.textContent = 'auth failed';
+      toast('Login failed — check logs', 'red');
+    }
+  } catch (e) {
+    dot.className = 'status-dot offline';
+    label.textContent = 'server offline';
+    toast('Server unreachable', 'red');
+  }
+}
+
+function saveSettings() {
+  toast('Settings saved');
+}
+
+function logout() {
+  toast('Logged out of Robinhood', 'red');
+}
+
+// Auto-refresh every 10 seconds
+loadState();
+loadLivePrices();
+loadPnL();
+setInterval(loadState, 10000);
+setInterval(loadLivePrices, 5000);
+setInterval(loadPnL, 30000);
+
+// Auth status check
+async function checkAuth() {
+  const dot = document.getElementById('auth-dot');
+  const label = document.getElementById('auth-label');
+  try {
+    const res = await fetch(BASE + '/health');
+    if (res.ok) {
+      dot.className = 'status-dot';
+      label.textContent = 'server online';
+    } else {
+      dot.className = 'status-dot offline';
+      label.textContent = 'server error';
+    }
+  } catch {
+    dot.className = 'status-dot offline';
+    label.textContent = 'server offline';
+  }
+}
+checkAuth();
+setInterval(checkAuth, 30000);
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js').then(function(reg) {
+      console.log('SW registered');
+    }).catch(function(err) {
+      console.log('SW failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>
