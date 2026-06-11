@@ -56,8 +56,9 @@ async function populateTicker(ticker, force) {
   var s = stateModule.getState();
   var today = etDate();
   var orb = s.orb && s.orb[ticker];
-  // Skip if already captured for today (unless forced)
-  if (!force && orb && orb.set && lastCaptureDate[ticker] === today) {
+  // Skip if ORB is already set for today — by ANYONE (Pine webhook is
+  // authoritative; Yahoo must never overwrite it). Only a manual force refetches.
+  if (!force && orb && orb.set && orb.date === today) {
     return { ticker: ticker, set: true, skipped: true };
   }
   var range = await fetchOpeningRange(ticker);

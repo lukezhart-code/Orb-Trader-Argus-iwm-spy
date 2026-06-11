@@ -1,15 +1,9 @@
 var rh = require("./robinhood");
 var stateModule = require("./state");
+var expiryUtil = require("./expiry");
 
 function getExpiry(ticker) {
-  var target = new Date();
-  if (ticker === "SPY") {
-    target.setDate(target.getDate() + 1);
-    while (target.getDay() === 0 || target.getDay() === 6) {
-      target.setDate(target.getDate() + 1);
-    }
-  }
-  return target.toISOString().split("T")[0];
+  return expiryUtil.getExpiry(ticker);
 }
 
 async function placeOrder(opts) {

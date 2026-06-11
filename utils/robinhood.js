@@ -2,9 +2,10 @@
 const https = require("https");
 const crypto = require("crypto");
 const fs = require("fs");
+const persist = require("./persist");
 
 const RH_BASE = "api.robinhood.com";
-const REFRESH_FILE = "/tmp/rh-refresh.json";
+const REFRESH_FILE = persist.filePath("rh-refresh.json");   // volume-backed: survives redeploys
 let _token = null;
 let _deviceToken = null;
 
@@ -211,15 +212,48 @@ async function getQuote(ticker) {
   return parseFloat(res.last_trade_price || res.ask_price || 0);
 }
 
+// Find the nearest listed expiration for this chain/strike/type at or after the
+// requested date (falls back to the latest available if none are later).
+async function findNearestExpiry(ticker, strike, optionType, requested) {
+  for (const offset of [0, 1, -1, 2, -2, 5, -5]) {
+    const url = `/options/instruments/?chain_symbol=${ticker}&strike_price=${strike + offset}&type=${optionType}&state=active`;
+    const res = await authedRequest("GET", url, null, "json");
+    const results = res.results || [];
+    if (results.length) {
+      const dates = Array.from(new Set(results.map(r => r.expiration_date).filter(Boolean))).sort();
+      if (dates.length) {
+        const onOrAfter = dates.filter(d => d >= requested);
+        return onOrAfter.length ? onOrAfter[0] : dates[dates.length - 1];
+      }
+    }
+  }
+  return null;
+}
+
 async function getOptionInstrument(ticker, expiry, strike, optionType) {
-  const url = `/options/instruments/?chain_symbol=${ticker}&expiration_dates=${expiry}&strike_price=${strike}&type=${optionType}&state=active`;
-  const res = await authedRequest("GET", url, null, "json");
-  const results = res.results || [];
-  if (results.length > 0) return results[0];
-  for (const offset of [1, -1, 2, -2, 5, -5]) {
-    const url2 = `/options/instruments/?chain_symbol=${ticker}&expiration_dates=${expiry}&strike_price=${strike + offset}&type=${optionType}&state=active`;
-    const res2 = await authedRequest("GET", url2, null, "json");
-    if (res2.results && res2.results.length > 0) return res2.results[0];
+  async function tryExpiry(exp) {
+    let url = `/options/instruments/?chain_symbol=${ticker}&expiration_dates=${exp}&strike_price=${strike}&type=${optionType}&state=active`;
+    let res = await authedRequest("GET", url, null, "json");
+    if (res.results && res.results.length > 0) return res.results[0];
+    for (const offset of [1, -1, 2, -2, 5, -5]) {
+      url = `/options/instruments/?chain_symbol=${ticker}&expiration_dates=${exp}&strike_price=${strike + offset}&type=${optionType}&state=active`;
+      res = await authedRequest("GET", url, null, "json");
+      if (res.results && res.results.length > 0) return res.results[0];
+    }
+    return null;
+  }
+
+  // 1) Requested expiry (with nearby-strike fallback)
+  let inst = await tryExpiry(expiry);
+  if (inst) return inst;
+
+  // 2) Requested expiry isn't listed (e.g. SPY 0DTE on a non-listed day, or
+  //    IWM 1DTE when no next-day expiry exists) → roll to nearest available.
+  const alt = await findNearestExpiry(ticker, strike, optionType, expiry);
+  if (alt && alt !== expiry) {
+    console.log("[OPTION] " + ticker + " " + expiry + " not listed — rolling to nearest " + alt);
+    inst = await tryExpiry(alt);
+    if (inst) return inst;
   }
   return null;
 }
@@ -330,10 +364,38 @@ async function refreshToken(refreshTokenValue) {
   }
 }
 
+// Read-only option pricing for the paper feed (no order placement involved).
+// Uses authedRequest so an expired access token auto-refreshes.
+async function getOptionMark(ticker, side, strike, expiry) {
+  const optionType = side === "call" ? "call" : "put";
+  const instrument = await getOptionInstrument(ticker, expiry, strike, optionType);
+  if (!instrument) return null;
+  const price = await getOptionMarkByUrl(instrument.url);
+  return {
+    price: price,
+    instrument: instrument.url,
+    strike: instrument.strike_price ? Math.round(parseFloat(instrument.strike_price)) : strike,
+    expiry: instrument.expiration_date || expiry
+  };
+}
+
+async function getOptionMarkByUrl(instrumentUrl) {
+  const quoteRes = await authedRequest("GET", `/marketdata/options/?instruments=${encodeURIComponent(instrumentUrl)}`, null, "json");
+  const r = quoteRes && quoteRes.results && quoteRes.results[0];
+  if (!r) return null;
+  let p = parseFloat(r.mark_price || r.adjusted_mark_price || r.last_trade_price || 0);
+  if (!p || isNaN(p)) {
+    const bid = parseFloat(r.bid_price || 0), ask = parseFloat(r.ask_price || 0);
+    if (bid && ask) p = (bid + ask) / 2;
+  }
+  return p && !isNaN(p) ? p : null;
+}
+
 module.exports = {
   login, setToken, getToken, setDeviceToken, refreshToken,
   getStoredRefreshToken, reauthorize,
   handleVerificationWorkflow, completeWorkflow,
   respondToSmsChallenge, waitForPushApproval,
-  getQuote, placeOptionOrder, closeOptionPosition
+  getQuote, placeOptionOrder, closeOptionPosition,
+  getOptionMark, getOptionMarkByUrl
 };
