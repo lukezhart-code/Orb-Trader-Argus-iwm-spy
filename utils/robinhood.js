@@ -1,10 +1,31 @@
 // Direct Robinhood API - modern 2026 auth flow
 const https = require("https");
 const crypto = require("crypto");
+const fs = require("fs");
 
 const RH_BASE = "api.robinhood.com";
+const REFRESH_FILE = "/tmp/rh-refresh.json";
 let _token = null;
 let _deviceToken = null;
+
+// Robinhood ROTATES the refresh token on every refresh: each success returns a
+// new refresh_token and invalidates the previous one. We persist the latest to
+// /tmp so in-container restarts keep a valid token instead of falling back to a
+// stale Railway env value (the cause of repeated invalid_grant errors).
+function persistRefreshToken(rt) {
+  try { fs.writeFileSync(REFRESH_FILE, JSON.stringify({ refresh_token: rt, ts: Date.now() })); }
+  catch(e) { console.log("[AUTH] Could not persist refresh token: " + e.message); }
+}
+
+function getStoredRefreshToken() {
+  try {
+    if (fs.existsSync(REFRESH_FILE)) {
+      var d = JSON.parse(fs.readFileSync(REFRESH_FILE, "utf8"));
+      if (d && d.refresh_token) return d.refresh_token;   // most recent rotation wins
+    }
+  } catch(e) {}
+  return process.env.RH_REFRESH_TOKEN || null;            // fall back to Railway env
+}
 
 function generateDeviceToken() {
   const rands = Array.from(crypto.randomBytes(16));
@@ -17,7 +38,7 @@ function generateDeviceToken() {
   return token;
 }
 
-function request(method, path, data, token, contentType) {
+function rawRequest(method, path, data, token, contentType) {
   return new Promise((resolve, reject) => {
     const isForm = contentType === "form";
     const body = data
@@ -46,14 +67,56 @@ function request(method, path, data, token, contentType) {
       let raw = "";
       res.on("data", chunk => raw += chunk);
       res.on("end", () => {
-        try { resolve(JSON.parse(raw)); }
-        catch(e) { resolve({ raw }); }
+        let parsed;
+        try { parsed = JSON.parse(raw); }
+        catch(e) { parsed = { raw }; }
+        resolve({ status: res.statusCode, body: parsed });
       });
     });
     req.on("error", reject);
     if (body) req.write(body);
     req.end();
   });
+}
+
+// Backward-compatible: returns just the parsed body (used by auth/login flows).
+function request(method, path, data, token, contentType) {
+  return rawRequest(method, path, data, token, contentType).then(r => r.body);
+}
+
+// Did Robinhood reject us for auth reasons?
+function isAuthError(r) {
+  if (r.status === 401 || r.status === 403) return true;
+  var b = r.body || {};
+  var msg = (b.detail || b.error || b.error_description || "").toString().toLowerCase();
+  return msg.indexOf("token") !== -1 && msg.indexOf("expired") !== -1
+      || msg.indexOf("authentication credentials") !== -1
+      || msg.indexOf("not provided") !== -1
+      || msg.indexOf("unauthorized") !== -1
+      || msg.indexOf("invalid token") !== -1;
+}
+
+// Force a token refresh using the freshest stored refresh token.
+async function reauthorize() {
+  var rt = getStoredRefreshToken();
+  if (!rt) { console.log("[AUTH] reauthorize: no refresh token available"); return false; }
+  var res = await refreshToken(rt);
+  if (res.ok) { console.log("[AUTH] reauthorize: token refreshed"); return true; }
+  console.log("[AUTH] reauthorize failed: " + res.error);
+  return false;
+}
+
+// Authed data request with one refresh-and-retry on token expiry. This is what
+// keeps orders/quotes working when the access token lapses mid-session instead
+// of silently failing the trade.
+async function authedRequest(method, path, data, contentType) {
+  var r = await rawRequest(method, path, data, _token, contentType);
+  if (isAuthError(r)) {
+    console.log("[AUTH] Access token rejected on " + method + " " + path + " — refreshing and retrying once");
+    var ok = await reauthorize();
+    if (ok) r = await rawRequest(method, path, data, _token, contentType);
+  }
+  return r.body;
 }
 
 async function login(email, password, mfa_code) {
@@ -144,18 +207,18 @@ function getToken() { return _token; }
 function setDeviceToken(dt) { _deviceToken = dt; }
 
 async function getQuote(ticker) {
-  const res = await request("GET", `/quotes/${ticker}/`, null, _token, "json");
+  const res = await authedRequest("GET", `/quotes/${ticker}/`, null, "json");
   return parseFloat(res.last_trade_price || res.ask_price || 0);
 }
 
 async function getOptionInstrument(ticker, expiry, strike, optionType) {
   const url = `/options/instruments/?chain_symbol=${ticker}&expiration_dates=${expiry}&strike_price=${strike}&type=${optionType}&state=active`;
-  const res = await request("GET", url, null, _token, "json");
+  const res = await authedRequest("GET", url, null, "json");
   const results = res.results || [];
   if (results.length > 0) return results[0];
   for (const offset of [1, -1, 2, -2, 5, -5]) {
     const url2 = `/options/instruments/?chain_symbol=${ticker}&expiration_dates=${expiry}&strike_price=${strike + offset}&type=${optionType}&state=active`;
-    const res2 = await request("GET", url2, null, _token, "json");
+    const res2 = await authedRequest("GET", url2, null, "json");
     if (res2.results && res2.results.length > 0) return res2.results[0];
   }
   return null;
@@ -166,7 +229,7 @@ async function placeOptionOrder(ticker, side, contracts, expiry, strike, optionT
   if (!instrument) throw new Error(`No option found: ${ticker} ${expiry} ${strike} ${optionType}`);
 
   const instrumentUrl = instrument.url;
-  const quoteRes = await request("GET", `/marketdata/options/?instruments=${encodeURIComponent(instrumentUrl)}`, null, _token, "json");
+  const quoteRes = await authedRequest("GET", `/marketdata/options/?instruments=${encodeURIComponent(instrumentUrl)}`, null, "json");
   const askPrice = quoteRes.results?.[0]?.ask_price || "1.00";
   const limitPrice = (parseFloat(askPrice) * 1.05).toFixed(2);
 
@@ -190,7 +253,7 @@ async function placeOptionOrder(ticker, side, contracts, expiry, strike, optionT
   };
 
   console.log(`[ORDER] ${ticker} ${optionType} x${contracts} strike=${strike} expiry=${expiry} price=${limitPrice}`);
-  const res = await request("POST", "/options/orders/", order, _token, "json");
+  const res = await authedRequest("POST", "/options/orders/", order, "json");
   if (res.id) {
     console.log(`[ORDER_OK] ${res.id}`);
     return { ok: true, order_id: res.id, price: limitPrice };
@@ -200,12 +263,12 @@ async function placeOptionOrder(ticker, side, contracts, expiry, strike, optionT
 }
 
 async function closeOptionPosition(ticker, contracts, reason) {
-  const positions = await request("GET", "/options/positions/?nonzero=true", null, _token, "json");
+  const positions = await authedRequest("GET", "/options/positions/?nonzero=true", null, "json");
   const matching = (positions.results || []).filter(p => p.chain_symbol === ticker && parseFloat(p.quantity) > 0);
   if (!matching.length) return { ok: false, error: "No open position found" };
 
   const pos = matching[0];
-  const quoteRes = await request("GET", `/marketdata/options/?instruments=${encodeURIComponent(pos.option)}`, null, _token, "json");
+  const quoteRes = await authedRequest("GET", `/marketdata/options/?instruments=${encodeURIComponent(pos.option)}`, null, "json");
   const bidPrice = quoteRes.results?.[0]?.bid_price || "0.10";
   const limitPrice = (parseFloat(bidPrice) * 0.95).toFixed(2);
 
@@ -234,7 +297,7 @@ async function closeOptionPosition(ticker, contracts, reason) {
   };
 
   console.log(`[CLOSE] ${ticker} selling ${contracts}c — ${reason}`);
-  const res = await request("POST", "/options/orders/", order, _token, "json");
+  const res = await authedRequest("POST", "/options/orders/", order, "json");
   if (res.id) return { ok: true, order_id: res.id, contracts, reason };
   console.log("[CLOSE_ERROR]", JSON.stringify(res));
   throw new Error(JSON.stringify(res));
@@ -254,7 +317,10 @@ async function refreshToken(refreshTokenValue) {
     var data = await request("POST", "/oauth2/token/", payload, null, "form");
     if (data.access_token) {
       _token = data.access_token;
-      if (data.refresh_token) process.env.RH_REFRESH_TOKEN = data.refresh_token;
+      if (data.refresh_token) {
+        process.env.RH_REFRESH_TOKEN = data.refresh_token;
+        persistRefreshToken(data.refresh_token);   // survive in-container restarts
+      }
       console.log("[AUTH] Token refreshed successfully");
       return { ok: true, token: _token };
     }
@@ -266,6 +332,7 @@ async function refreshToken(refreshTokenValue) {
 
 module.exports = {
   login, setToken, getToken, setDeviceToken, refreshToken,
+  getStoredRefreshToken, reauthorize,
   handleVerificationWorkflow, completeWorkflow,
   respondToSmsChallenge, waitForPushApproval,
   getQuote, placeOptionOrder, closeOptionPosition
