@@ -3,6 +3,21 @@ var trayd = require("../utils/trayd");
 var orbUtil = require("../utils/orb");
 var fs = require("fs");
 
+// Discord is personal-only. require() is optional so the customer build
+// (which ships no discord.js) is unaffected. All calls are fire-and-forget
+// and fully swallowed so a Discord hiccup can never break order flow.
+var discord = null;
+try { discord = require("../utils/discord"); } catch (e) { discord = null; }
+async function notify(fn, args) {
+  try {
+    if (discord && typeof discord[fn] === "function") await discord[fn].apply(null, args);
+  } catch (e) { console.log("[DISCORD_NOTIFY_ERROR] " + fn + ": " + e.message); }
+}
+function fillPriceOf(order, fallback) {
+  var p = order && order.result && order.result.price ? parseFloat(order.result.price) : NaN;
+  return isNaN(p) ? (fallback || 0) : p;
+}
+
 function logTradePnL(ticker, side, entryPrice, exitPrice, contracts) {
   try {
     var pnlFile = "/tmp/orb-pnl.json";
@@ -121,6 +136,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     if (!pos || pos.stopped) return { ok: true, message: ticker + " no active long position" };
     if (pos.side !== "call") return { ok: true, message: ticker + " position is not a call" };
     stateModule.logEvent("STOP_LOSS", ticker + " ORB midpoint stop hit — closing long");
+    await notify("postStopLoss", [ticker, optPrice || 0, "Stop — ORB Midpoint"]);
     await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB midpoint stop" });
     if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
     stateModule.closePosition(ticker, "ORB midpoint stop");
@@ -132,6 +148,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     if (!pos || pos.stopped) return { ok: true, message: ticker + " no active short position" };
     if (pos.side !== "put") return { ok: true, message: ticker + " position is not a put" };
     stateModule.logEvent("STOP_LOSS", ticker + " ORB midpoint stop hit — closing short");
+    await notify("postStopLoss", [ticker, optPrice || 0, "Stop — ORB Midpoint"]);
     await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB midpoint stop" });
     if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
     stateModule.closePosition(ticker, "ORB midpoint stop");
@@ -146,6 +163,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     // If we have a short position open, close it first
     if (pos && !pos.stopped && pos.side === "put") {
       stateModule.logEvent("FLIP", ticker + " breakout long — closing put first");
+      await notify("postFullClose", [ticker, optPrice || 0]);
       await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB breakout flip to long" });
       if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
       stateModule.closePosition(ticker, "flip to long");
@@ -157,6 +175,8 @@ async function processEvent(payload, ticker, event, lockedTickers) {
       // lock still sees an open position instead of re-entering.
       stateModule.logEvent("ENTRY", ticker + " call @ breakout_long half=" + half + "/" + total);
       stateModule.openHalfPosition(ticker, "call", half, optPrice || close || 0);
+      // Paper feed trades on the signal regardless of the real order outcome.
+      await notify("postEntry", [ticker, "call", optPrice || 0, s.orb[ticker].high || orbHigh || 0, s.orb[ticker].low || orbLow || 0, close]);
       var order;
       try {
         order = await trayd.placeOrder({ ticker: ticker, side: "call", contracts: half });
@@ -174,6 +194,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
         var spyHalf = Math.ceil(s.contracts.SPY / 2);
         stateModule.logEvent("CROSS_ENTRY", "IWM breakout long → entering SPY call half=" + spyHalf);
         stateModule.openHalfPosition("SPY", "call", spyHalf, null);
+        await notify("postEntry", ["SPY", "call", 0, s.orb.SPY.high || 0, s.orb.SPY.low || 0, null]);
         try {
           cross = await trayd.placeOrder({ ticker: "SPY", side: "call", contracts: spyHalf });
         } catch (e) {
@@ -189,11 +210,13 @@ async function processEvent(payload, ticker, event, lockedTickers) {
       var addQty = pos.totalContracts;
       stateModule.logEvent("RETEST", ticker + " retest add " + addQty + "c");
       stateModule.addSecondHalf(ticker, addQty, optPrice || close || pos.entryPrice);
+      var addOrder = null;
       try {
-        await trayd.placeOrder({ ticker: ticker, side: "call", contracts: addQty });
+        addOrder = await trayd.placeOrder({ ticker: ticker, side: "call", contracts: addQty });
       } catch (e) {
         stateModule.logEvent("RETEST_ERROR", ticker + " retest order failed: " + e.message);
       }
+      await notify("postAdd", [ticker, 0]);
       return { ok: true, message: ticker + " second half added on retest" };
     }
 
@@ -208,6 +231,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     // If we have a long position open, close it first
     if (pos && !pos.stopped && pos.side === "call") {
       stateModule.logEvent("FLIP", ticker + " breakout short — closing call first");
+      await notify("postFullClose", [ticker, optPrice || 0]);
       await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB breakout flip to short" });
       if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
       stateModule.closePosition(ticker, "flip to short");
@@ -217,6 +241,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     if (!pos || pos.stopped) {
       stateModule.logEvent("ENTRY", ticker + " put @ breakout_short half=" + half2 + "/" + total2);
       stateModule.openHalfPosition(ticker, "put", half2, optPrice || close || 0);
+      await notify("postEntry", [ticker, "put", optPrice || 0, s.orb[ticker].high || orbHigh || 0, s.orb[ticker].low || orbLow || 0, close]);
       var order2;
       try {
         order2 = await trayd.placeOrder({ ticker: ticker, side: "put", contracts: half2 });
@@ -234,6 +259,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
         var spyHalf2 = Math.ceil(s.contracts.SPY / 2);
         stateModule.logEvent("CROSS_ENTRY", "IWM breakout short → entering SPY put half=" + spyHalf2);
         stateModule.openHalfPosition("SPY", "put", spyHalf2, null);
+        await notify("postEntry", ["SPY", "put", 0, s.orb.SPY.high || 0, s.orb.SPY.low || 0, null]);
         try {
           cross2 = await trayd.placeOrder({ ticker: "SPY", side: "put", contracts: spyHalf2 });
         } catch (e) {
@@ -249,11 +275,13 @@ async function processEvent(payload, ticker, event, lockedTickers) {
       var addQty2 = pos.totalContracts;
       stateModule.logEvent("RETEST", ticker + " retest add " + addQty2 + "c");
       stateModule.addSecondHalf(ticker, addQty2, optPrice || close || pos.entryPrice);
+      var addOrder2 = null;
       try {
-        await trayd.placeOrder({ ticker: ticker, side: "put", contracts: addQty2 });
+        addOrder2 = await trayd.placeOrder({ ticker: ticker, side: "put", contracts: addQty2 });
       } catch (e) {
         stateModule.logEvent("RETEST_ERROR", ticker + " retest order failed: " + e.message);
       }
+      await notify("postAdd", [ticker, 0]);
       return { ok: true, message: ticker + " second half added on retest" };
     }
 
@@ -269,18 +297,18 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     var gainPct = ((optPrice - pos.entryPrice) / pos.entryPrice) * 100;
     var tier = pos.lastProfitTier;
 
-    // Activate breakeven stop at +50%
-    if (!pos.breakEvenActivated && gainPct >= 50) {
+    // Activate breakeven stop at +30%
+    if (!pos.breakEvenActivated && gainPct >= 30) {
       stateModule.setBreakEven(ticker);
-      stateModule.logEvent("BREAKEVEN", ticker + " +50% — stop moved to breakeven");
+      stateModule.logEvent("BREAKEVEN", ticker + " +30% — stop moved to breakeven");
     }
 
-    // Every +20% → sell 10%
-    var increments = Math.floor(gainPct / 20);
+    // Every +10% → sell 10%
+    var increments = Math.floor(gainPct / 10);
     if (increments > tier && gainPct < 100 && tier < 100) {
       var sell10 = Math.max(1, Math.floor(pos.contracts * 0.10));
       stateModule.logEvent("PROFIT_TIER_1", ticker + " +" + gainPct.toFixed(1) + "% selling 10% (" + sell10 + "c)");
-      await trayd.closePartialPosition({ ticker: ticker, contracts: sell10, reason: "+20% tier sell 10%" });
+      await trayd.closePartialPosition({ ticker: ticker, contracts: sell10, reason: "+10% scale-out" });
       stateModule.markProfitTier(ticker, increments);
       return { ok: true, message: ticker + " +20% profit tier" };
     }
