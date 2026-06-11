@@ -8,6 +8,7 @@ const { handleAlert } = require("./routes/alert");
 const { getState, setContractSize } = require("./utils/state");
 const { ensureLoggedIn, submitSmsCode, getPendingWorkflow, scheduleDailyReauth, validateWhopLicense } = require("./utils/reauth");
 const rh = require("./utils/robinhood");
+const orbUtil = require("./utils/orb");
 
 app.get("/manifest.json", (req, res) => {
   res.sendFile(require("path").join(__dirname, "dashboard", "manifest.json"));
@@ -55,6 +56,15 @@ app.get("/api/state", async (req, res) => {
   var licenseKey = process.env.WHOP_LICENSE_KEY;
   s.license = { valid: !!licenseKey && licenseKey.length > 5, error: licenseKey ? null : "No license key set" };
   res.json(s);
+});
+
+app.get("/api/orb/refresh", async (req, res) => {
+  try {
+    var results = await orbUtil.populateIfNeeded(true);
+    res.json({ ok: true, orb: results });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // Live prices endpoint
@@ -166,4 +176,5 @@ app.listen(PORT, async () => {
   console.log("ORB server listening on port " + PORT);
   await ensureLoggedIn();
   scheduleDailyReauth();
+  orbUtil.scheduleORBCapture();
 });
