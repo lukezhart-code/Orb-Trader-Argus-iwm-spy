@@ -4,7 +4,6 @@
 var stateModule = require("./state");
 var exitlogic = require("./exitlogic");
 var trayd = require("./trayd");
-var discord = require("./discord");
 var https = require("https");
 var fs = require("fs");
 
@@ -85,21 +84,21 @@ async function getOpenOptionPositions(token) {
 async function checkProfitTiers(token) {
   if (!isMarketHours()) return;
 
-  var s = stateModule.getState();
-  var tickers = ["SPY", "IWM"];
+  // Source of truth = the LIVE Robinhood positions. We manage whatever is open
+  // on the account, so stops fire even if internal state was lost (redeploy
+  // without a volume) or the position was entered manually.
+  var rhPositions = await getOpenOptionPositions(token);
+  var managed = ["SPY", "IWM"];
+  var handled = {};
 
-  for (var i = 0; i < tickers.length; i++) {
-    var ticker = tickers[i];
-    var pos = stateModule.getPosition(ticker);
-    if (!pos || pos.stopped || pos.entryPrice <= 0) continue;
-
-    // Get current option price from Robinhood
-    var rhPositions = await getOpenOptionPositions(token);
-    var rhPos = rhPositions.find(function(p) { return p.chain_symbol === ticker && parseFloat(p.quantity) > 0; });
-    if (!rhPos) {
-      console.log("[PROFIT_MGR] No RH position found for " + ticker);
-      continue;
-    }
+  for (var i = 0; i < rhPositions.length; i++) {
+    var rhPos = rhPositions[i];
+    var ticker = rhPos.chain_symbol;
+    if (managed.indexOf(ticker) === -1) continue;
+    if (handled[ticker]) continue;            // one position per ticker (ORB)
+    var qty = parseFloat(rhPos.quantity);
+    if (!(qty > 0)) continue;
+    handled[ticker] = true;
 
     var optionPrice = await getOptionPrice(token, rhPos.option);
     if (!optionPrice || optionPrice <= 0) {
@@ -107,17 +106,41 @@ async function checkProfitTiers(token) {
       continue;
     }
 
+    // Entry = real average cost. RH stores option average_price as premium×100,
+    // so normalize to per-share by comparing against the live per-share price.
+    var avgRaw = parseFloat(rhPos.average_price);
+    var entryPremium = avgRaw;
+    if (optionPrice > 0 && (avgRaw / optionPrice) > 20) entryPremium = avgRaw / 100;
+    if (!(entryPremium > 0)) continue;
+
+    // Internal state carries trailing-stop / tier progression. Synthesize and
+    // adopt it from the live position if we don't have it (so the ladder is
+    // remembered between 30s polls within a session).
+    var pos = stateModule.getPosition(ticker);
+    if (!pos || !(pos.entryPrice > 0)) {
+      pos = stateModule.adoptPosition(ticker, {
+        side: rhPos.option_type || "call",
+        contracts: qty, totalContracts: qty,
+        entryPrice: entryPremium, realizedPnl: 0,
+        breakEvenActivated: false, lastProfitTier: 0, stopPct: null, stopped: false,
+        adopted: true
+      });
+      stateModule.logEvent("ADOPT", ticker + " managing live position @ $" + entryPremium.toFixed(2) + " x" + qty + " (no prior state)");
+    } else {
+      pos.contracts = qty;                    // keep size in sync with the broker
+    }
+    if (pos.stopped) continue;
+
     var entryPrice = pos.entryPrice;
-    var contracts = pos.contracts;
+    var contracts = qty;
     var decision = exitlogic.evaluate(pos, optionPrice);
     var gainPct = decision.gain;
 
     console.log("[PROFIT_MGR] " + ticker + " entry=$" + entryPrice.toFixed(2) + " current=$" + optionPrice.toFixed(2) + " gain=" + gainPct.toFixed(1) + "% tier=" + (pos.lastProfitTier||0) + " stop=" + decision.newStopPct + "%");
 
-    // persist trailing stop level
     pos.stopPct = decision.newStopPct;
 
-    // ── End-of-day: sell 50% of every open position at 3:45 PM ET ──────────
+    // ── End-of-day: sell 50% at 3:45 PM ET ───────────────────────────────
     if (exitlogic.isEndOfDayWindow() && pos.eodSold !== exitlogic.etDateKey()) {
       var eodQty = Math.max(1, Math.floor(contracts * exitlogic.EOD_SELL_FRAC));
       stateModule.logEvent("EOD_SELL", ticker + " 3:45 ET — selling 50% (" + eodQty + "c) before close @ $" + optionPrice.toFixed(2));
@@ -129,13 +152,13 @@ async function checkProfitTiers(token) {
       contracts = pos.contracts;
     }
 
-    // ── Breakeven activation at +30% ──────────────────────────────────────
+    // ── Breakeven activation at +30% ─────────────────────────────────────
     if (decision.activateBreakeven) {
       stateModule.setBreakEven(ticker);
       stateModule.logEvent("BREAKEVEN", ticker + " +30% — stop moved to breakeven $" + entryPrice.toFixed(2));
     }
 
-    // ── Trailing / initial stop-out → exit full remaining ─────────────────
+    // ── Trailing / initial stop-out → exit full remaining ────────────────
     if (decision.stopOut && !pos.stopped) {
       var reason = pos.breakEvenActivated ? "Trailing stop " + decision.newStopPct + "%" : "Initial stop -15%";
       stateModule.logEvent("STOP_OUT", ticker + " " + reason + " hit @ $" + optionPrice.toFixed(2) + " (" + gainPct.toFixed(1) + "%)");
@@ -145,7 +168,7 @@ async function checkProfitTiers(token) {
       continue;
     }
 
-    // ── Scale-out: sell 10% for every +10% of gain ────────────────────────
+    // ── Scale-out: sell 10% for every +10% of gain ───────────────────────
     if (decision.scaleOut) {
       var sell10 = Math.max(1, Math.floor(contracts * decision.sellFraction));
       stateModule.logEvent("PROFIT_TIER", ticker + " +" + gainPct.toFixed(1) + "% — selling 10% (" + sell10 + "c) @ $" + optionPrice.toFixed(2));
@@ -169,4 +192,4 @@ function startProfitManager(getToken) {
   }, 30 * 1000); // every 30 seconds
 }
 
-module.exports = { startProfitManager };
+module.exports = { startProfitManager, checkProfitTiers };

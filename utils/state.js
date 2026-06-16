@@ -56,6 +56,14 @@ function setORB(ticker, high, low) {
 
 function getPosition(ticker) { return state.positions[ticker]; }
 
+// Adopt a live broker position into state so the profit manager can track its
+// trailing-stop / tier progression across polls even when internal state was
+// lost (e.g. a redeploy without a volume) or the trade was entered manually.
+function adoptPosition(ticker, pos) {
+  state.positions[ticker] = pos;
+  return pos;
+}
+
 function openHalfPosition(ticker, side, contracts, entryPrice) {
   state.positions[ticker] = {
     side: side,
@@ -121,6 +129,7 @@ module.exports = {
   resetDay: resetDay,
   setORB: setORB,
   getPosition: getPosition,
+  adoptPosition: adoptPosition,
   openHalfPosition: openHalfPosition,
   addSecondHalf: addSecondHalf,
   setBreakEven: setBreakEven,

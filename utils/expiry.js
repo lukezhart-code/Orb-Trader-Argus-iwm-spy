@@ -25,6 +25,22 @@ function getExpiry(ticker) {            // "YYYY-MM-DD"
   return getExpiryDate(ticker).toISOString().split("T")[0];
 }
 
+// Fixed-DTE variants (for per-channel paper feeds that pin their own DTE,
+// independent of the dashboard's global per-ticker setting).
+function getExpiryDateForDTE(dte) {
+  var d = new Date();
+  var added = 0;
+  while (added < dte) {
+    d.setDate(d.getDate() + 1);
+    var day = d.getDay();
+    if (day !== 0 && day !== 6) added++;
+  }
+  return d;
+}
+function getExpiryForDTE(dte) {
+  return getExpiryDateForDTE(dte).toISOString().split("T")[0];
+}
+
 function getDTELabel(ticker) {          // "0DTE" / "1DTE" / ...
   return getDTE(ticker) + "DTE";
 }
@@ -50,4 +66,4 @@ function contractLabel(ticker, side, strike, ymd) {
   return "$" + ticker + " " + s + " " + sideLabel + " - " + formatExpiryLabel(ymd);
 }
 
-module.exports = { getDTE, getExpiryDate, getExpiry, getDTELabel, formatExpiryLabel, contractLabel };
+module.exports = { getDTE, getExpiryDate, getExpiry, getExpiryForDTE, getDTELabel, formatExpiryLabel, contractLabel };

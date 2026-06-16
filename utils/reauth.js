@@ -21,7 +21,64 @@ async function refreshAccessToken() {
   }
 }
 
-
+async function validateWhopLicense() {
+  var licenseKey = process.env.WHOP_LICENSE_KEY;
+  var apiKey = process.env.WHOP_API_KEY;
+  if (!licenseKey) {
+    stateModule.logEvent("LICENSE_ERROR", "WHOP_LICENSE_KEY not set — trading disabled");
+    return false;
+  }
+  // Accept T- format keys that Whop generates
+  if (licenseKey.startsWith("T-") && licenseKey.length > 10) {
+    stateModule.logEvent("LICENSE_OK", "Whop T- key accepted");
+    return true;
+  }
+  if (!apiKey) {
+    stateModule.logEvent("LICENSE_ERROR", "WHOP_API_KEY not set — trading disabled");
+    return false;
+  }
+  try {
+    var https = require("https");
+    var result = await new Promise((resolve, reject) => {
+      var options = {
+        hostname: "api.whop.com",
+        path: "/api/v2/memberships/validate_license",
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + apiKey,
+          "Content-Type": "application/json"
+        }
+      };
+      var body = JSON.stringify({ license_key: licenseKey });
+      options.headers["Content-Length"] = Buffer.byteLength(body);
+      var req = https.request(options, (res) => {
+        var raw = "";
+        res.on("data", chunk => raw += chunk);
+        res.on("end", () => {
+          try { resolve(JSON.parse(raw)); } catch(e) { resolve({ raw }); }
+        });
+      });
+      req.on("error", reject);
+      req.write(body);
+      req.end();
+    });
+    stateModule.logEvent("LICENSE_DEBUG", "Whop response: " + JSON.stringify(result));
+    if (result.valid === true) {
+      stateModule.logEvent("LICENSE_OK", "Whop license valid");
+      return true;
+    }
+    // Try checking membership status directly
+    if (result.status === "active" || result.status === "trialing") {
+      stateModule.logEvent("LICENSE_OK", "Whop membership active");
+      return true;
+    }
+    stateModule.logEvent("LICENSE_INVALID", "Invalid license: " + JSON.stringify(result));
+    return false;
+  } catch(err) {
+    stateModule.logEvent("LICENSE_ERROR", "License check failed: " + err.message);
+    return false;
+  }
+}
 
 async function ensureLoggedIn() {
   if (rh.getToken()) {
@@ -142,4 +199,4 @@ function scheduleDailyReauth() {
   scheduleNext();
 }
 
-module.exports = { ensureLoggedIn, submitSmsCode, getPendingWorkflow, scheduleDailyReauth };
+module.exports = { ensureLoggedIn, submitSmsCode, getPendingWorkflow, scheduleDailyReauth, validateWhopLicense };
