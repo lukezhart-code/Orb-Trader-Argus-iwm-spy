@@ -136,7 +136,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     if (!pos || pos.stopped) return { ok: true, message: ticker + " no active long position" };
     if (pos.side !== "call") return { ok: true, message: ticker + " position is not a call" };
     stateModule.logEvent("STOP_LOSS", ticker + " ORB midpoint stop hit — closing long");
-    await notify("postStopLoss", [ticker, optPrice || 0, "Stop — ORB Midpoint"]);
+    await notify("onStop", [ticker, optPrice || 0, "Stop — ORB Midpoint"]);
     await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB midpoint stop" });
     if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
     stateModule.closePosition(ticker, "ORB midpoint stop");
@@ -148,7 +148,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     if (!pos || pos.stopped) return { ok: true, message: ticker + " no active short position" };
     if (pos.side !== "put") return { ok: true, message: ticker + " position is not a put" };
     stateModule.logEvent("STOP_LOSS", ticker + " ORB midpoint stop hit — closing short");
-    await notify("postStopLoss", [ticker, optPrice || 0, "Stop — ORB Midpoint"]);
+    await notify("onStop", [ticker, optPrice || 0, "Stop — ORB Midpoint"]);
     await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB midpoint stop" });
     if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
     stateModule.closePosition(ticker, "ORB midpoint stop");
@@ -163,7 +163,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     // If we have a short position open, close it first
     if (pos && !pos.stopped && pos.side === "put") {
       stateModule.logEvent("FLIP", ticker + " breakout long — closing put first");
-      await notify("postFullClose", [ticker, optPrice || 0]);
+      await notify("onFullClose", [ticker, optPrice || 0]);
       await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB breakout flip to long" });
       if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
       stateModule.closePosition(ticker, "flip to long");
@@ -176,7 +176,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
       stateModule.logEvent("ENTRY", ticker + " call @ breakout_long half=" + half + "/" + total);
       stateModule.openHalfPosition(ticker, "call", half, optPrice || close || 0);
       // Paper feed trades on the signal regardless of the real order outcome.
-      await notify("postEntry", [ticker, "call", optPrice || 0, s.orb[ticker].high || orbHigh || 0, s.orb[ticker].low || orbLow || 0, close]);
+      await notify("onEntry", [ticker, "call", optPrice || 0, s.orb[ticker].high || orbHigh || 0, s.orb[ticker].low || orbLow || 0, close]);
       var order;
       try {
         order = await trayd.placeOrder({ ticker: ticker, side: "call", contracts: half });
@@ -194,7 +194,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
         var spyHalf = Math.ceil(s.contracts.SPY / 2);
         stateModule.logEvent("CROSS_ENTRY", "IWM breakout long → entering SPY call half=" + spyHalf);
         stateModule.openHalfPosition("SPY", "call", spyHalf, null);
-        await notify("postEntry", ["SPY", "call", 0, s.orb.SPY.high || 0, s.orb.SPY.low || 0, null]);
+        await notify("onEntry", ["SPY", "call", 0, s.orb.SPY.high || 0, s.orb.SPY.low || 0, null]);
         try {
           cross = await trayd.placeOrder({ ticker: "SPY", side: "call", contracts: spyHalf });
         } catch (e) {
@@ -216,7 +216,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
       } catch (e) {
         stateModule.logEvent("RETEST_ERROR", ticker + " retest order failed: " + e.message);
       }
-      await notify("postAdd", [ticker, 0]);
+      await notify("onAdd", [ticker, 0]);
       return { ok: true, message: ticker + " second half added on retest" };
     }
 
@@ -231,7 +231,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     // If we have a long position open, close it first
     if (pos && !pos.stopped && pos.side === "call") {
       stateModule.logEvent("FLIP", ticker + " breakout short — closing call first");
-      await notify("postFullClose", [ticker, optPrice || 0]);
+      await notify("onFullClose", [ticker, optPrice || 0]);
       await trayd.closePartialPosition({ ticker: ticker, contracts: pos.contracts, reason: "ORB breakout flip to short" });
       if (optPrice) logTradePnL(ticker, pos.side, pos.entryPrice, optPrice, pos.contracts);
       stateModule.closePosition(ticker, "flip to short");
@@ -241,7 +241,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
     if (!pos || pos.stopped) {
       stateModule.logEvent("ENTRY", ticker + " put @ breakout_short half=" + half2 + "/" + total2);
       stateModule.openHalfPosition(ticker, "put", half2, optPrice || close || 0);
-      await notify("postEntry", [ticker, "put", optPrice || 0, s.orb[ticker].high || orbHigh || 0, s.orb[ticker].low || orbLow || 0, close]);
+      await notify("onEntry", [ticker, "put", optPrice || 0, s.orb[ticker].high || orbHigh || 0, s.orb[ticker].low || orbLow || 0, close]);
       var order2;
       try {
         order2 = await trayd.placeOrder({ ticker: ticker, side: "put", contracts: half2 });
@@ -259,7 +259,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
         var spyHalf2 = Math.ceil(s.contracts.SPY / 2);
         stateModule.logEvent("CROSS_ENTRY", "IWM breakout short → entering SPY put half=" + spyHalf2);
         stateModule.openHalfPosition("SPY", "put", spyHalf2, null);
-        await notify("postEntry", ["SPY", "put", 0, s.orb.SPY.high || 0, s.orb.SPY.low || 0, null]);
+        await notify("onEntry", ["SPY", "put", 0, s.orb.SPY.high || 0, s.orb.SPY.low || 0, null]);
         try {
           cross2 = await trayd.placeOrder({ ticker: "SPY", side: "put", contracts: spyHalf2 });
         } catch (e) {
@@ -281,7 +281,7 @@ async function processEvent(payload, ticker, event, lockedTickers) {
       } catch (e) {
         stateModule.logEvent("RETEST_ERROR", ticker + " retest order failed: " + e.message);
       }
-      await notify("postAdd", [ticker, 0]);
+      await notify("onAdd", [ticker, 0]);
       return { ok: true, message: ticker + " second half added on retest" };
     }
 
